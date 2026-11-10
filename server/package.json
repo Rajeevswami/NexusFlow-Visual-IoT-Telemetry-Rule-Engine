@@ -1,0 +1,30 @@
+{
+  "name": "nexusflow-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "simulate": "node scripts/simulator.js",
+    "benchmark": "node scripts/benchmark.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1",
+    "helmet": "^8.1.0",
+    "mongoose": "^8.24.8",
+    "morgan": "^1.10.1",
+    "ws": "^8.22.2",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.11",
+    "supertest": "^7.2.2"
+  }
+}
