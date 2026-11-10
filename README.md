@@ -399,7 +399,12 @@ TEST_MONGODB_URI="mongodb://127.0.0.1:27017" npm test
 
 ---
 
-## 9. Notes on this build
+## 9. Files
+
+Every file's complete source, in the same order as the folder tree above, is collected in
+[`CODE.md`](CODE.md).
+
+## 10. Notes on this build
 
 * Ingestion acknowledgment is tied to a successful database write; the WebSocket broadcast is
   separate and best-effort by design.
