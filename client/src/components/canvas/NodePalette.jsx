@@ -1,16 +1,21 @@
 import { GripVertical, MousePointer2, Search, X } from 'lucide-react';
 import { useState } from 'react';
-import { groups } from './nodeLibrary.js';
+import { PALETTE_GROUPS, getDefinition } from '../nodes/definitions.js';
 
+/**
+ * Left sidebar: every palette entry is draggable (HTML5 drag & drop, read by the canvas)
+ * and clickable (drops the node in the middle of the viewport).
+ */
 export default function NodePalette({ onAddNode }) {
   const [search, setSearch] = useState('');
-  const matches = groups.map((group) => ({
+  const query = search.trim().toLowerCase();
+  const matches = PALETTE_GROUPS.map((group) => ({
     ...group,
-    nodes: group.nodes.filter((node) => `${node.label} ${node.description}`.toLowerCase().includes(search.toLowerCase().trim())),
-  })).filter((group) => group.nodes.length);
+    items: group.items.filter((item) => `${item.label} ${item.description}`.toLowerCase().includes(query)),
+  })).filter((group) => group.items.length);
 
-  function startDrag(event, kind) {
-    event.dataTransfer.setData('application/nexusflow-node', kind);
+  function startDrag(event, item) {
+    event.dataTransfer.setData('application/nexusflow-node', JSON.stringify({ type: item.type, config: item.config }));
     event.dataTransfer.effectAllowed = 'move';
   }
 
@@ -27,25 +32,42 @@ export default function NodePalette({ onAddNode }) {
           {!search && <span className="search-shortcut">/</span>}
         </label>
       </div>
+
       <div className="palette-groups">
         {matches.length === 0 && <p className="palette-empty">No nodes match “{search}”.</p>}
         {matches.map((group) => (
           <section className="palette-group" key={group.id}>
-            <div className="group-heading"><h3>{group.label}</h3><span>{String(group.nodes.length).padStart(2, '0')}</span></div>
+            <div className="group-heading"><h3>{group.label}</h3><span>{String(group.items.length).padStart(2, '0')}</span></div>
             <div className="palette-items">
-              {group.nodes.map((node) => (
-                <button type="button" className="palette-item" key={node.kind} draggable
-                  onDragStart={(event) => startDrag(event, node.kind)} onClick={() => onAddNode(node.kind)}
-                  title={`Drag or click to add ${node.label}`}>
-                  <span className={`node-icon ${node.category}`}><node.icon size={18} strokeWidth={1.8} /></span>
-                  <span className="palette-item-copy"><strong>{node.label}</strong><small className="truncate">{node.description}</small></span>
-                  <GripVertical className="grip" size={15} aria-hidden="true" />
-                </button>
-              ))}
+              {group.items.map((item) => {
+                const definition = getDefinition(item.type);
+                const Icon = definition?.icon;
+                return (
+                  <button
+                    type="button"
+                    className={`palette-item ${definition?.category ?? ''}`}
+                    key={`${group.id}-${item.label}`}
+                    draggable
+                    onDragStart={(event) => startDrag(event, item)}
+                    onClick={() => onAddNode(item.type, item.config)}
+                    title={`Drag or click to add ${item.label}`}
+                  >
+                    <span className={`node-icon ${definition?.category ?? ''}`}>
+                      {Icon ? <Icon size={18} strokeWidth={1.8} /> : null}
+                    </span>
+                    <span className="palette-item-copy">
+                      <strong>{item.label}</strong>
+                      <small className="truncate">{item.description}</small>
+                    </span>
+                    <GripVertical className="grip" size={15} aria-hidden="true" />
+                  </button>
+                );
+              })}
             </div>
           </section>
         ))}
       </div>
+
       <div className="palette-tip">
         <span className="tip-icon"><MousePointer2 size={15} /></span>
         <div><strong>A little tip</strong><p>Drag to add, or click a node to place it on your canvas.</p></div>

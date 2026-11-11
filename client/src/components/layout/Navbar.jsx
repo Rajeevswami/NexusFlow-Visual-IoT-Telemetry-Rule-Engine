@@ -1,6 +1,9 @@
-import { ChevronRight, FolderOpen, LoaderCircle, Save } from 'lucide-react';
+import { ChevronRight, Download, FolderOpen, LoaderCircle, Save, ShieldCheck } from 'lucide-react';
 
-export default function Navbar({ health, onSave, onLoad, saving }) {
+/**
+ * Top toolbar: health indicator, Load / Validate / Export / Save.
+ */
+export default function Navbar({ health, onSave, onLoad, onValidate, onExport, saving, validating }) {
   const healthText = health === 'online' ? 'Backend connected' : health === 'offline' ? 'Backend offline' : 'Checking backend';
   return (
     <header className="navbar">
@@ -12,7 +15,12 @@ export default function Navbar({ health, onSave, onLoad, saving }) {
       <div className="nav-actions">
         <div className={`health ${health}`} role="status"><span className="health-dot" />{healthText}</div>
         <div className="nav-divider" />
-        <button className="button button-secondary" onClick={onLoad}><FolderOpen size={16} /><span>Load graph</span></button>
+        <button className="button button-ghost" onClick={onLoad}><FolderOpen size={16} /><span>Load graph</span></button>
+        <button className="button button-ghost" onClick={onValidate} disabled={validating}>
+          {validating ? <LoaderCircle className="spin" size={16} /> : <ShieldCheck size={16} />}
+          <span>{validating ? 'Validating...' : 'Validate graph'}</span>
+        </button>
+        <button className="button button-ghost" onClick={onExport}><Download size={16} /><span>Export JSON</span></button>
         <button className="button button-primary" onClick={onSave} disabled={saving}>
           {saving ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}<span>{saving ? 'Saving...' : 'Save graph'}</span>
         </button>

@@ -714,7 +714,7 @@
 
   /* ---------------- React Flow node ---------------- */
   .flow-node {
-    width: 220px;
+    width: 246px;
     padding: 12px;
     border-radius: 14px;
     border: 1px solid var(--line);
@@ -1321,6 +1321,219 @@
     opacity: 0.7;
   }
 }
+
+  /* ---------------- Node config fields (Day 2) ---------------- */
+  .node-headings {
+    min-width: 0;
+  }
+
+  .node-headings strong {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.25;
+  }
+
+  .node-headings small {
+    display: block;
+    font-size: 11px;
+    color: var(--ink-soft);
+    overflow-wrap: anywhere;
+  }
+
+  .node-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .node-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .node-field > span {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  .node-input {
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--page);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink);
+    outline: none;
+    transition: border-color 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+  }
+
+  .node-input:focus {
+    border-color: var(--teal);
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(23, 123, 121, 0.12);
+  }
+
+  .node-input.is-select {
+    appearance: none;
+    cursor: pointer;
+    background-image: linear-gradient(45deg, transparent 50%, var(--ink-soft) 50%), linear-gradient(135deg, var(--ink-soft) 50%, transparent 50%);
+    background-position: calc(100% - 14px) 13px, calc(100% - 9px) 13px;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+  }
+
+  .flow-node.source {
+    border-top: 3px solid #2f6fb3;
+  }
+
+  .flow-node.math {
+    border-top: 3px solid #b57a1a;
+  }
+
+  .flow-node.action {
+    border-top: 3px solid #b9523a;
+  }
+
+  .button-ghost {
+    background: #fff;
+  }
+
+  .icon-button.small {
+    width: 26px;
+    height: 26px;
+  }
+
+  /* ---------------- Validation panel (Day 2) ---------------- */
+  .validation-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--line);
+    background: #fff;
+    box-shadow: var(--shadow-panel);
+  }
+
+  .validation-panel.is-valid {
+    border-color: #bfe3d1;
+    background: #f4fbf7;
+  }
+
+  .validation-panel.is-invalid {
+    border-color: #f0cfc5;
+    background: #fdf5f2;
+  }
+
+  .validation-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .validation-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  .validation-panel.is-valid .validation-title {
+    color: #1f7a52;
+  }
+
+  .validation-panel.is-invalid .validation-title {
+    color: #b9523a;
+  }
+
+  .validation-source {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  .validation-ok {
+    margin: 0;
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+
+  .validation-list {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .validation-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .validation-list.errors li {
+    color: #a4442e;
+  }
+
+  .validation-list.warnings li {
+    color: #8a6a20;
+  }
+
+  .validation-link {
+    margin-left: auto;
+    border: none;
+    background: none;
+    padding: 0;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--teal);
+    text-decoration: underline;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .validation-warnings summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--ink-soft);
+    cursor: pointer;
+  }
+
+  .validation-warnings .validation-list {
+    margin-top: 8px;
+  }
+
+  .toast-action {
+    border: 1px solid currentColor;
+    border-radius: 8px;
+    padding: 4px 9px;
+    background: transparent;
+    color: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .toast-action:hover {
+    background: rgba(32, 54, 64, 0.06);
+  }
 
 @media (max-width: 1180px) {
   .editor-body {

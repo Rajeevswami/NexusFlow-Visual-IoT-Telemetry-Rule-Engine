@@ -11,20 +11,25 @@
     "start": "node src/server.js",
     "simulate": "node scripts/simulator.js",
     "benchmark": "node scripts/benchmark.js",
-    "test": "node --test"
+    "test": "vitest run && node --test test/validation.test.js test/integration.test.js test/compilerRoutes.test.js",
+    "test:compiler": "vitest run",
+    "test:http": "node --test test/validation.test.js test/integration.test.js test/compilerRoutes.test.js"
   },
   "dependencies": {
+    "axios": "^1.21.1",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.22.1",
     "helmet": "^8.1.0",
     "mongoose": "^8.24.8",
     "morgan": "^1.10.1",
+    "rxjs": "^7.8.2",
     "ws": "^8.22.2",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "nodemon": "^3.1.11",
-    "supertest": "^7.2.2"
+    "supertest": "^7.2.2",
+    "vitest": "^5.1.0"
   }
 }
