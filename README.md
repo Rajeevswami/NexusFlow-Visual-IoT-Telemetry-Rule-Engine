@@ -558,7 +558,7 @@ curl -X POST http://localhost:5000/api/telemetry -H 'Content-Type: application/j
 ```bash
 cd server
 npm test                 # vitest compiler suite + node:test HTTP/database suite
-npm run test:compiler    # 27 unit tests: validator, operators, stream compiler
+npm run test:compiler    # 28 unit tests: validator, operators, stream compiler
 npm run test:http        # HTTP routes (validation, compile, compile-with-stubbed-model)
 TEST_MONGODB_URI="mongodb://127.0.0.1:27017" npm test
 # the integration suite creates a throwaway database and asserts the time-series

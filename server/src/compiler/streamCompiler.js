@@ -89,6 +89,7 @@ export function compileGraph(graph, options = {}) {
     if (path.includes(nodeId)) throw new Error(`Node "${nodeId}" is part of a cycle (${[...path, nodeId].join(' -> ')}).`);
 
     const node = nodesById.get(nodeId);
+    if (!node) throw new Error(`Node "${nodeId}" not found in graph (edge points at a missing node).`);
     const config = resolveConfig(node.type, node.config);
     let stream$;
 
@@ -96,16 +97,23 @@ export function compileGraph(graph, options = {}) {
       stream$ = subjects.get(nodeId);
     } else {
       const [parentId] = parents.get(nodeId);
-      const input$ = buildStream(parentId, [...path, nodeId]);
-      const operator = node.definition.createOperator(config, { graphId, nodeId, dryRun });
-      // A failing operator must not tear down sibling branches: catch here and log.
-      stream$ = input$.pipe(
-        operator,
-        catchError((error) => {
-          console.error(`[compiler] node "${nodeId}" (${node.type}) failed: ${error.message}`);
-          return EMPTY;
-        }),
-      );
+      if (!parentId) {
+        // A math node may legally have no input (the validator flags this as a warning:
+        // it can never receive data). Compile it as a dead branch — an EMPTY stream —
+        // instead of dereferencing an undefined parent and crashing the whole pipeline.
+        stream$ = EMPTY;
+      } else {
+        const input$ = buildStream(parentId, [...path, nodeId]);
+        const operator = node.definition.createOperator(config, { graphId, nodeId, dryRun });
+        // A failing operator must not tear down sibling branches: catch here and log.
+        stream$ = input$.pipe(
+          operator,
+          catchError((error) => {
+            console.error(`[compiler] node "${nodeId}" (${node.type}) failed: ${error.message}`);
+            return EMPTY;
+          }),
+        );
+      }
     }
 
     // Fan-out: share one upstream subscription between all children.
