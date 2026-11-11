@@ -93,6 +93,20 @@ describe('streamCompiler', () => {
     compiled.dispose();
   });
 
+  it('compiles a disconnected math node feeding an action as a dead branch instead of crashing', async () => {
+    // average-1 has no input (validator: warning only) but feeds log-1.
+    const graph = {
+      nodes: [sourceNode('sensor-1'), averageNode('average-1', 3), logAction('log-1')],
+      edges: [link('average-1', 'log-1')],
+    };
+    const compiled = compileGraph(graph, { dryRun: true });
+    // Dry-run values reach the source; the dead branch emits nothing, so no crash and no alerts.
+    compiled.pushValues([80, 90, 100]);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(compiled.getAlerts()).toEqual([]);
+    compiled.dispose();
+  });
+
   it('refuses to compile an invalid graph', () => {
     expect(() => compileGraph({ nodes: [averageNode()], edges: [] }, { dryRun: true })).toThrow(GraphValidationError);
     const invalid = { nodes: [sourceNode(), averageNode()], edges: [link('sensor-1', 'average-1'), link('average-1', 'sensor-1')] };

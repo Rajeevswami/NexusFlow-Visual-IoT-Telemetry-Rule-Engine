@@ -2,7 +2,7 @@
 
 Every file in this repository is reproduced below in the same order as the folder tree in
 `README.md`. Generated from the working tree on branch
-`arena/a2887e0e-nexusflow-visual-iot-telemetry` (Day 1 + Day 2).
+`arena/90868532-nexusflow-visual-iot-telemetry` (Day 1 + Day 2).
 For a Day-2-only view, see [`DAY2-FILES.md`](DAY2-FILES.md).
 
 ## `README.md`
@@ -568,7 +568,7 @@ curl -X POST http://localhost:5000/api/telemetry -H 'Content-Type: application/j
 ```bash
 cd server
 npm test                 # vitest compiler suite + node:test HTTP/database suite
-npm run test:compiler    # 27 unit tests: validator, operators, stream compiler
+npm run test:compiler    # 28 unit tests: validator, operators, stream compiler
 npm run test:http        # HTTP routes (validation, compile, compile-with-stubbed-model)
 TEST_MONGODB_URI="mongodb://127.0.0.1:27017" npm test
 # the integration suite creates a throwaway database and asserts the time-series
@@ -1996,6 +1996,7 @@ export function compileGraph(graph, options = {}) {
     if (path.includes(nodeId)) throw new Error(`Node "${nodeId}" is part of a cycle (${[...path, nodeId].join(' -> ')}).`);
 
     const node = nodesById.get(nodeId);
+    if (!node) throw new Error(`Node "${nodeId}" not found in graph (edge points at a missing node).`);
     const config = resolveConfig(node.type, node.config);
     let stream$;
 
@@ -2003,16 +2004,23 @@ export function compileGraph(graph, options = {}) {
       stream$ = subjects.get(nodeId);
     } else {
       const [parentId] = parents.get(nodeId);
-      const input$ = buildStream(parentId, [...path, nodeId]);
-      const operator = node.definition.createOperator(config, { graphId, nodeId, dryRun });
-      // A failing operator must not tear down sibling branches: catch here and log.
-      stream$ = input$.pipe(
-        operator,
-        catchError((error) => {
-          console.error(`[compiler] node "${nodeId}" (${node.type}) failed: ${error.message}`);
-          return EMPTY;
-        }),
-      );
+      if (!parentId) {
+        // A math node may legally have no input (the validator flags this as a warning:
+        // it can never receive data). Compile it as a dead branch — an EMPTY stream —
+        // instead of dereferencing an undefined parent and crashing the whole pipeline.
+        stream$ = EMPTY;
+      } else {
+        const input$ = buildStream(parentId, [...path, nodeId]);
+        const operator = node.definition.createOperator(config, { graphId, nodeId, dryRun });
+        // A failing operator must not tear down sibling branches: catch here and log.
+        stream$ = input$.pipe(
+          operator,
+          catchError((error) => {
+            console.error(`[compiler] node "${nodeId}" (${node.type}) failed: ${error.message}`);
+            return EMPTY;
+          }),
+        );
+      }
     }
 
     // Fan-out: share one upstream subscription between all children.
@@ -3516,6 +3524,20 @@ describe('streamCompiler', () => {
     expect(compiled.sources).toEqual([{ nodeId: 'sensor-1', type: 'sensor', deviceId: 'turbine-001', sensorType: 'temperature', key: 'turbine-001:temperature' }]);
     expect(compiled.nodeCount).toBe(4);
     expect(compiled.edgeCount).toBe(3);
+    compiled.dispose();
+  });
+
+  it('compiles a disconnected math node feeding an action as a dead branch instead of crashing', async () => {
+    // average-1 has no input (validator: warning only) but feeds log-1.
+    const graph = {
+      nodes: [sourceNode('sensor-1'), averageNode('average-1', 3), logAction('log-1')],
+      edges: [link('average-1', 'log-1')],
+    };
+    const compiled = compileGraph(graph, { dryRun: true });
+    // Dry-run values reach the source; the dead branch emits nothing, so no crash and no alerts.
+    compiled.pushValues([80, 90, 100]);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(compiled.getAlerts()).toEqual([]);
     compiled.dispose();
   });
 
@@ -5089,7 +5111,8 @@ export default function EditorPage() {
     try {
       const graph = (await graphApi.get(id)).data.data;
       setNodes(graph.nodes ?? []);
-      setEdges(graph.edges ?? []);
+      // Saved edges carry no `type`; re-apply the canvas default so the round trip is seamless.
+      setEdges((graph.edges ?? []).map((edge) => ({ type: 'smoothstep', ...edge })));
       setName(graph.name ?? 'Untitled graph');
       setValidation(null);
       setPickerOpen(false);
@@ -5228,7 +5251,6 @@ export default function EditorPage() {
   );
 }
 ```
-
 ## `client/src/index.css`
 
 ```css

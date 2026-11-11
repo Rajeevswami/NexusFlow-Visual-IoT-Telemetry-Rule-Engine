@@ -143,7 +143,8 @@ export default function EditorPage() {
     try {
       const graph = (await graphApi.get(id)).data.data;
       setNodes(graph.nodes ?? []);
-      setEdges(graph.edges ?? []);
+      // Saved edges carry no `type`; re-apply the canvas default so the round trip is seamless.
+      setEdges((graph.edges ?? []).map((edge) => ({ type: 'smoothstep', ...edge })));
       setName(graph.name ?? 'Untitled graph');
       setValidation(null);
       setPickerOpen(false);
