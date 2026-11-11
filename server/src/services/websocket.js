@@ -25,14 +25,30 @@ export function attachWebSocketServer(httpServer) {
   return socketServer;
 }
 
-/** Best-effort delivery: a slow client must never block ingestion or consume unbounded memory. */
-export function broadcastTelemetry(data) {
+/**
+ * Best-effort fan-out. A slow or dead client must never block ingestion or make the
+ * server buffer unbounded data, so anything over `maxBufferedBytes` is skipped.
+ *
+ * @param {string} type message type, for example "telemetry" or "alert"
+ * @param {unknown} data payload
+ */
+function broadcast(type, data) {
   if (!socketServer || socketServer.clients.size === 0) return;
-  const message = JSON.stringify({ type: 'telemetry', data });
+  const message = JSON.stringify({ type, data });
   for (const socket of socketServer.clients) {
     if (socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > maxBufferedBytes) continue;
     socket.send(message, (error) => {
       if (error) console.error('WebSocket broadcast failed:', error.message);
     });
   }
+}
+
+/** Push freshly ingested telemetry to every connected client. */
+export function broadcastTelemetry(data) {
+  broadcast('telemetry', data);
+}
+
+/** Push an alert raised by a compiled pipeline to every connected client. */
+export function broadcastAlert(data) {
+  broadcast('alert', data);
 }

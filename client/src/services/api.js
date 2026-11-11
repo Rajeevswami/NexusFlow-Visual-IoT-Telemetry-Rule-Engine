@@ -10,8 +10,22 @@ export const graphApi = {
   create: (graph) => api.post('/graphs', graph),
   list: () => api.get('/graphs'),
   get: (id) => api.get(`/graphs/${encodeURIComponent(id)}`),
+  /** Validate raw graph JSON server-side without saving it. */
+  validate: (graph) => api.post('/graphs/validate', graph),
+  /** Compile + activate a saved graph (returns the pipeline summary). */
+  compile: (id) => api.post(`/graphs/${encodeURIComponent(id)}/compile`),
+  deactivate: (id) => api.post(`/graphs/${encodeURIComponent(id)}/deactivate`),
+  active: () => api.get('/graphs/active'),
+  /** Dry run: push sample values through the compiled pipeline. */
+  test: (id, values) => api.post(`/graphs/${encodeURIComponent(id)}/test`, { values }),
 };
 
 export function errorMessage(error) {
-  return error.response?.data?.error?.message || (error.code === 'ECONNABORTED' ? 'The request timed out.' : 'Cannot reach the backend. Check that the server and MongoDB are running.');
+  return error.response?.data?.error?.message
+    || (error.code === 'ECONNABORTED' ? 'The request timed out.' : 'Cannot reach the backend. Check that the server and MongoDB are running.');
+}
+
+/** Backend validation issues, when the API returned a 400 with details. */
+export function errorDetails(error) {
+  return Array.isArray(error.response?.data?.error?.details) ? error.response.data.error.details : [];
 }

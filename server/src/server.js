@@ -4,6 +4,7 @@ import app from './app.js';
 import { connectDatabase } from './config/db.js';
 import { env } from './config/env.js';
 import { attachWebSocketServer } from './services/websocket.js';
+import { activeGraphManager } from './services/activeGraphManager.js';
 
 let server;
 let sockets;
@@ -20,6 +21,8 @@ async function shutdown(signal) {
     sockets.close();
   }
   if (server?.listening) await new Promise((resolve) => server.close(resolve));
+  // Release every compiled pipeline before the process exits.
+  activeGraphManager.disposeAll();
   await mongoose.disconnect();
   clearTimeout(forceExit);
 }

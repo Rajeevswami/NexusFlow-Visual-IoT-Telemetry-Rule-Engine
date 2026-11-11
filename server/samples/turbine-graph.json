@@ -1,0 +1,86 @@
+{
+  "name": "Turbine overheat rule",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "nodes": [
+    {
+      "id": "sensor-turbine",
+      "type": "sensor",
+      "position": {
+        "x": 0,
+        "y": 120
+      },
+      "data": {
+        "label": "Turbine Sensor",
+        "config": {
+          "deviceId": "turbine-001",
+          "sensorType": "temperature"
+        }
+      }
+    },
+    {
+      "id": "average-1",
+      "type": "movingAverage",
+      "position": {
+        "x": 300,
+        "y": 120
+      },
+      "data": {
+        "label": "Moving Average Filter",
+        "config": {
+          "windowSize": 5
+        }
+      }
+    },
+    {
+      "id": "threshold-1",
+      "type": "threshold",
+      "position": {
+        "x": 600,
+        "y": 120
+      },
+      "data": {
+        "label": "Overheat Threshold",
+        "config": {
+          "operator": ">",
+          "value": 80
+        }
+      }
+    },
+    {
+      "id": "sms-1",
+      "type": "smsAlert",
+      "position": {
+        "x": 900,
+        "y": 120
+      },
+      "data": {
+        "label": "SMS Alert",
+        "config": {
+          "phone": "+911234567890",
+          "messageTemplate": "ALERT ${deviceId} ${sensorType} average = ${value}${unit}"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-1",
+      "source": "sensor-turbine",
+      "target": "average-1"
+    },
+    {
+      "id": "edge-2",
+      "source": "average-1",
+      "target": "threshold-1"
+    },
+    {
+      "id": "edge-3",
+      "source": "threshold-1",
+      "target": "sms-1"
+    }
+  ]
+}
