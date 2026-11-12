@@ -11,6 +11,12 @@ fan-out, and the React Flow editor scaffold with graph persistence.
 that turns a saved React Flow JSON graph into executable RxJS pipelines, graph validation and
 serialization end to end, and the alerts collection written by action nodes.
 
+**Day 3 scope:** live execution — the `telemetryBus` feeds every HTTP/WS reading into the compiled
+pipelines through an O(1) `ruleExecutor`, the `/ws` server gains a channel subscription protocol
+(`telemetry:<deviceId>`, `alerts`, `graph:<id>`) with per-device throttling, alerts gain a
+per-device cooldown, and a live **Dashboard** (rolling Recharts line, stat cards, alert feed with
+toasts, engine status) subscribes to it all in real time.
+
 ---
 
 ## 1. Tech stack
@@ -46,16 +52,20 @@ NexusFlow-Visual-IoT-Telemetry-Rule-Engine
 │   ├── samples/
 │   │   └── turbine-graph.json    # Sensor -> Moving Average -> Threshold -> SMS Alert
 │   ├── scripts/
-│   │   ├── simulator.js          # mock hardware: N devices, anomaly spikes, batched POSTs
+│   │   ├── simulator.js          # mock hardware: N devices, spikes, HTTP or WebSocket
+│   │   ├── engineCheck.js        # DAY 3: activate + simulate + compare alerts vs expected
 │   │   └── benchmark.js          # throughput harness (target: 5,000 writes/sec)
 │   ├── test/
 │   │   ├── validation.test.js    # schema + HTTP behaviour, no database
 │   │   ├── integration.test.js   # real MongoDB, skipped unless TEST_MONGODB_URI is set
 │   │   ├── compilerRoutes.test.js# compile/test/activate HTTP routes (model stubbed)
+│   │   ├── websocketChannels.test.js  # DAY 3: subscribe/unsubscribe/ingest/throttle
 │   │   └── compiler/
 │   │       ├── graphValidator.test.js
 │   │       ├── operators.test.js
-│   │       └── streamCompiler.test.js
+│   │       ├── streamCompiler.test.js
+│   │       ├── ruleExecutor.test.js        # DAY 3: routing + deactivation isolation
+│   │       └── activityCooldown.test.js     # DAY 3: node activity taps + cooldown
 │   └── src/
 │       ├── server.js             # HTTP bootstrap + /ws + graceful shutdown
 │       ├── app.js                # helmet, cors, morgan, routes, error middleware
@@ -65,10 +75,12 @@ NexusFlow-Visual-IoT-Telemetry-Rule-Engine
 │       │   ├── Device.js         # deviceId, name, type, location, createdAt
 │       │   ├── Graph.js          # name, nodes[], edges[], viewport, timestamps
 │       │   └── Alert.js          # DAY 2: alerts raised by action nodes
-│       ├── controllers/{telemetryController,graphController}.js
-│       ├── routes/{telemetryRoutes,graphRoutes}.js
+│       ├── controllers/{telemetryController,graphController,alertController}.js
+│       ├── routes/{telemetryRoutes,graphRoutes,alertRoutes,engineRoutes}.js
 │       ├── services/
-│       │   ├── websocket.js      # connected / telemetry / alert broadcasts
+│       │   ├── websocket.js      # DAY 3: channel protocol, throttled fan-out, WS ingestion
+│       │   ├── telemetryBus.js   # DAY 3: central RxJS Subject + engine counters
+│       │   ├── ruleExecutor.js   # DAY 3: O(1) deviceId:sensorType routing per reading
 │       │   ├── activeGraphManager.js   # DAY 2: graphId -> running pipeline
 │       │   └── alertService.js         # DAY 2: persist alerts
 │       ├── compiler/                   # DAY 2: JSON graph -> RxJS
@@ -90,7 +102,13 @@ NexusFlow-Visual-IoT-Telemetry-Rule-Engine
     └── src/
         ├── main.jsx, App.jsx, index.css
         ├── pages/EditorPage.jsx
+        ├── pages/DashboardPage.jsx     # DAY 3: live dashboard
+        ├── ws/
+        │   ├── WebSocketProvider.jsx   # DAY 3: shared socket, channels, backoff reconnect
+        │   └── useChannel.js           # DAY 3: one-line channel subscription
+        ├── hooks/useTelemetrySeries.js # DAY 3: 200 ms buffered series for charts
         ├── components/
+        │   ├── dashboard/              # DAY 3: LiveLineChart, StatCards, AlertFeed, EngineStatus
         │   ├── nodes/                  # DAY 2 custom node types
         │   │   ├── index.js            # nodeTypes, defined once at module scope
         │   │   ├── definitions.js      # single source of truth for every node type
@@ -105,13 +123,14 @@ NexusFlow-Visual-IoT-Telemetry-Rule-Engine
         │   │   ├── NodePalette.jsx     # grouped, draggable, searchable
         │   │   ├── graphRules.js       # client-side connection + graph rules
         │   │   └── nodeLibrary.js      # re-exports the new definitions
-        │   ├── layout/Navbar.jsx       # health + Load / Validate / Export / Save
+        │   ├── layout/Navbar.jsx       # health + nav + Activate/Deactivate/Send test data
+        │   ├── layout/NavLinks.jsx     # DAY 3: Editor | Dashboard router links
         │   ├── FlowInspector.jsx       # stats, checklist, live telemetry
         │   ├── GraphPicker.jsx         # accessible "Load graph" modal
         │   └── ValidationPanel.jsx     # validation errors and warnings
         └── services/
-            ├── api.js             # Axios client (+ compile / validate / test helpers)
-            ├── useTelemetry.js    # same-origin WebSocket hook w/ reconnect
+            ├── api.js             # Axios client (+ compile / alerts / stats / engine helpers)
+            ├── useTelemetry.js    # buffered `telemetry` channel hook
             └── graphSerializer.js # clean { nodes, edges } JSON, download, copy
 ```
 
@@ -155,6 +174,7 @@ npm install
 | `MONGODB_URI` | `mongodb://127.0.0.1:27017/nexusflow` | database connection string |
 | `CLIENT_ORIGIN` | `http://localhost:5173` | comma-separated CORS origins (the Vite proxy is same-origin and needs no CORS) |
 | `TELEMETRY_RETENTION_SECONDS` | *(empty)* | optional `expireAfterSeconds` TTL, applied **only when the collection is first created** |
+| `NODE_ACTIVITY_ENABLED` | `true` | Day 3: per-node `tap()` activity reporting (`node_activity` messages for Day 4's glowing wires). Set `false` to disable instrumentation in production runs |
 
 `client/.env`
 
@@ -314,7 +334,87 @@ dry-run mode.
 
 ---
 
-## 6. API reference
+## 6. Live execution flow (Day 3)
+
+Every reading — HTTP single, HTTP batch or WebSocket — enters **one** RxJS Subject and fans out
+from there. The HTTP response is sent first (202 after the durable write); rule evaluation and
+browser delivery always happen on the next tick.
+
+```
+                       ┌────────────────────────── device (simulator / hardware / curl) ─┐
+                       │                                                                  │
+              POST /api/telemetry[/batch]                          WS { type:"telemetry" }
+                       │                                                                  │
+                       ▼                                                                  ▼
+        ┌─────────────────────────────┐   validate + save   ┌──────────────────────────────────┐
+        │  MongoDB (time-series)      │◄────────────────────│  HTTP 202 / WS ack (responded    │
+        │  insertMany (non-blocking   │   setImmediate()    │  FIRST, before any rule runs)    │
+        │  for the rule path)         │──────────────┐      └──────────────────────────────────┘
+        └─────────────────────────────┘              │
+                                                     ▼
+                              ┌──────────────────────────────────────────┐
+                              │  telemetryBus  (hot RxJS Subject)        │
+                              │  + engine counters (processed / mps /    │
+                              │    alertsFired)                          │
+                              └──────────────────────────────────────────┘
+                                   │                            │
+             ┌─────────────────────┤                            ├──────────────────────┐
+             ▼                     ▼                            ▼                      ▼
+  ┌────────────────────┐  ┌──────────────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+  │ ruleExecutor       │  │ websocket broadcaster     │  │ (future sinks)  │  │ GET /api/engine/ │
+  │ Map<key, routes>   │  │ per-device throttle >20/  │  │                 │  │ status           │
+  │ deviceId:sensorType│  │ s -> sampleTime(100)      │  │                 │  │                  │
+  └─────────┬──────────┘  └────────────┬─────────────┘  └──────────────────┘  └──────────────────┘
+            │  one Subject per graph,   │
+            │  catchError isolated      │
+            ▼                           │
+  ┌──────────────────────────────────┐  │
+  │ compiled RxJS pipeline (per      │  │   channel subscribers
+  │ active graph):                   │  │   · telemetry:<deviceId>  (or `telemetry` for all)
+  │  Source Subject                  │  │   · alerts
+  │    → MovingAverage → Threshold   │──┤   · graph:<graphId>  (alert + node_activity + status)
+  │      → Action (tap → activityBus)│  │
+  │      → Action fires:             │  │
+  │         1. cooldown check (N s)  │  │
+  │         2. Alert → MongoDB       │  │
+  │         3. broadcast "alert"     │  │
+  └──────────────────────────────────┘  │
+                                        ▼
+                       ┌─────────────────────────────────────────┐
+                       │  Browser: WebSocketProvider (channels)  │
+                       │   · Dashboard: rolling chart, stat      │
+                       │     cards, alert feed + toast, engine   │
+                       │     status (polls /api/engine/status)   │
+                       │   · Editor: activation badge, inspector │
+                       └─────────────────────────────────────────┘
+```
+
+Key properties:
+
+* **Respond first, evaluate after** — `telemetryController` answers `202` right after
+  `insertMany`; `telemetryBus.ingest()` runs inside `setImmediate`, so rule evaluation can never
+  delay ingestion.
+* **O(1) routing** — `ruleExecutor` indexes every compiled source as `deviceId:sensorType` in a
+  `Map`; wildcard sources (`*`) live in a tiny side list. Graphs are never looped per reading, and
+  multiple active graphs each get their own delivery Subject wrapped in `catchError`, so one
+  broken pipeline cannot crash the engine (it logs and resubscribes).
+* **Registration is automatic** — `activeGraphManager.activate()` registers the pipeline with the
+  executor and broadcasts `graph_status: "active"`; `deactivate()` unregisters it, disposes the
+  RxJS subscriptions and broadcasts `graph_status: "inactive"`.
+* **Channel fan-out, not broadcast** — the WebSocket server keeps `channel -> Set<socket>` and
+  sends a message only to sockets subscribed to a matching channel (deduplicated per socket).
+  Devices faster than ~20 msg/s are sampled to 10 msg/s on the wire (latest wins, 100 ms window)
+  while **every** reading is still saved and evaluated server-side.
+* **Alert cooldown** — action nodes accept `cooldownSeconds` in their config: while the window is
+  open (per device) the handler is never called, so nothing is persisted or broadcast. `0`
+  (default) disables it.
+* **Optional instrumentation** — with `NODE_ACTIVITY_ENABLED=true` (default) every node pipes a
+  throttled `tap()` (`{ graphId, nodeId, value }`) to the `node_activity` channel for Day 4's
+  glowing wires; set it to `false` to remove the taps from production pipelines.
+
+---
+
+## 7. API reference
 
 Base URL: `http://localhost:5000/api`
 
@@ -334,6 +434,9 @@ Base URL: `http://localhost:5000/api`
 | `POST` | `/graphs/:id/deactivate` | – | `200 { data: { graphId, active: false } }`, `404` when it was not running |
 | `GET` | `/graphs/active` | – | `200 { data: [ { graphId, name, nodeCount, edgeCount, sources, activatedAt, subscriptions } ] }` |
 | `POST` | `/graphs/:id/test` | `{ values: [70, 85, 90] }` | `200 { data: { dryRun: true, delivered, alertCount, alerts[] } }` |
+| `GET` | `/alerts` | `graphId`, `deviceId`, `limit` (1–500, default 50) | `200 { data: [...] }` recent alerts, newest first |
+| `GET` | `/telemetry/stats` | `deviceId`, `window` (`30s`/`5m`/`2h`/`1d`, default `5m`) | `200 { data: { buckets: [ { minute, avg, min, max, count } ] } }` — MongoDB `$dateTrunc` per-minute aggregation |
+| `GET` | `/engine/status` | – | `200 { data: { activeGraphs, messagesProcessed, messagesPerSecond, alertsFired, routedReadings, routingErrors, uptimeSeconds } }` |
 
 Reading payload:
 
@@ -354,37 +457,72 @@ Reading payload:
 * `202` is returned **after** the write is acknowledged; the WebSocket broadcast is best-effort
   and happens after the response is sent.
 
-### WebSocket
+### WebSocket (Day 3 channel protocol)
 
 `ws://localhost:5000/ws`
 
+**Client → server**
+
 ```jsonc
-// on connect
-{ "type": "connected", "data": { "message": "Connected to NexusFlow" } }
-
-// on every accepted ingestion request
-{ "type": "telemetry", "data": { "metadata": { "deviceId": "turbine-001" }, "value": 86.4, "unit": "°C" } }
-
-// Day 2: raised by an action node of an active pipeline
-{ "type": "alert", "data": { "graphId": "...", "nodeId": "sms-1", "type": "smsAlert", "deviceId": "turbine-001", "value": 87.8, "message": "ALERT turbine-001 temperature average = 87.80" } }
+{ "type": "subscribe",   "channels": ["telemetry:turbine-001", "alerts", "graph:<graphId>"] }
+{ "type": "unsubscribe", "channels": ["alerts"] }
+{ "type": "telemetry",   "data": { "timestamp": "...", "metadata": { "deviceId": "turbine-001", "sensorType": "temperature", "location": "Bay 3" }, "value": 86.4, "unit": "°C" } }
+{ "type": "ping" }
 ```
 
-Clients that buffer more than 1 MB are skipped rather than slowing ingestion, and dead sockets are
-reaped by a 30-second ping/pong heartbeat.
+Channels: `telemetry` (all devices), `telemetry:<deviceId>`, `alerts`, `graph:<graphId>`.
+Malformed JSON, unknown types and invalid payloads get `{ "type": "error", ... }` back and never
+crash the server.
+
+**Server → client**
+
+```jsonc
+{ "type": "connected",     "data": { "message": "Connected to NexusFlow", "channels": [...] } }
+{ "type": "subscribed",    "data": { "channels": ["alerts"] } }
+{ "type": "ack",           "data": { "accepted": 1, "timestamp": "..." } }        // WS ingestion
+{ "type": "telemetry",     "data": { "metadata": { "deviceId": "turbine-001" }, "value": 86.4, "unit": "°C" } }
+{ "type": "alert",         "data": { "graphId", "nodeId", "deviceId", "value", "message", "severity", "triggeredAt" } }
+{ "type": "node_activity", "data": { "graphId", "nodeId", "value", "timestamp" } }   // Day 4 glowing wires
+{ "type": "graph_status",  "data": { "graphId", "status": "active|inactive|error" } }
+{ "type": "error",         "data": { "message": "..." } }
+```
+
+Delivery is per subscription — a socket only ever receives messages for its channels (deduplicated
+if it subscribes to several channels carrying the same message). Devices sending faster than
+~20 msg/s are sampled to 10 msg/s **on the broadcast path only**; saving and rule evaluation see
+every reading. Clients that buffer more than 1 MB are skipped rather than slowing ingestion, and
+dead sockets are reaped by a 30-second ping/pong heartbeat.
 
 ---
 
-## 7. Simulator and benchmark
+## 8. Simulator and benchmark
 
 **Simulator** (`server/scripts/simulator.js`) — emits temperature, vibration and pressure readings
-for N devices every X ms, injects an anomaly spike (temperature > 80 °C) in ~4% of ticks, and posts
-each tick as a batch (chunked at the 1,000-reading API limit):
+for N devices every X ms, injects anomaly spikes (temperature > 80 °C), and ships them over HTTP,
+WebSocket or both (chunked at the 1,000-reading API limit for HTTP):
 
 ```bash
 cd server
-npm run simulate                                   # 10 devices, 1000 ms
+npm run simulate                                   # 10 devices, 1000 ms, HTTP batches
 npm run simulate -- --devices 50 --interval 200    # 150 readings every 200 ms
+npm run simulate -- --transport ws                 # push every reading over /ws
+npm run simulate -- --transport both --spikes 0.15 # HTTP + WS with 15% anomaly chance
 npm run simulate -- --url http://192.168.1.20:5000 # point at another host
+```
+
+**Engine check** (`server/scripts/engineCheck.js`) — the Day 3 end-to-end assertion: activates the
+sample turbine graph, pushes a deterministic series with anomaly spikes (HTTP or WS), replays the
+moving-average/threshold window locally to compute the expected alert count, then compares it with
+`GET /api/alerts`:
+
+```bash
+cd server
+npm run engine-check                                # 60 readings, spike every 7th
+npm run engine-check -- --transport ws --rounds 200 --spike-every 3
+#   readings sent    : 60
+#   alerts expected  : 9
+#   alerts fired     : 9
+#   result           : PASS ✓          (exit code 0; the graph is deactivated afterwards)
 ```
 
 **Benchmark** (`server/scripts/benchmark.js`) — fires concurrent batch requests and prints
@@ -403,7 +541,7 @@ between hundreds and thousands of writes per second.
 
 ---
 
-## 8. Visual editor
+## 9. Visual editor
 
 **Nodes (Day 2)** — each node type is a React component registered once at module scope in
 `client/src/components/nodes/index.js`:
@@ -425,10 +563,14 @@ sources cannot receive input, actions cannot output, self-connections, duplicate
 that would create a loop are refused, and only `Source -> Math -> … -> Action` and
 `Source -> Action` flows are allowed. Dropping on an invalid target shows the reason in a toast.
 
-**Toolbar** — editable graph name, live backend health pill, **Load graph**, **Validate graph**
-(checks source/action presence, disconnected nodes and cycles; the backend is asked too when it
-is reachable), **Export JSON** (downloads `{ name, nodes, edges, viewport }` and offers a
-copy-to-clipboard action) and **Save graph**.
+**Toolbar (Day 3)** — editable graph name, live backend health pill, an **INACTIVE / ACTIVE /
+ERROR** engine badge fed by `graph_status` messages, **Activate** / **Deactivate**
+(`POST /graphs/:id/compile` and `/deactivate`), **Send test data** (pushes 4 normal + 2 overheat
+readings through the real ingestion API so a rule can be seen firing from the UI), then
+**Load graph**, **Validate graph** (checks source/action presence, disconnected nodes and cycles;
+the backend is asked too when it is reachable), **Export JSON** (downloads
+`{ name, nodes, edges, viewport }` and offers a copy-to-clipboard action) and **Save graph**.
+Navigation between the **Editor** and the live **Dashboard** is a pill switcher in the header.
 
 **Canvas** — drag to pan, scroll to zoom, MiniMap, Controls, dotted Background, smooth-step
 edges, delete with <kbd>Delete</kbd> / <kbd>Backspace</kbd>.
@@ -453,9 +595,9 @@ Saved JSON is deliberately clean (no React Flow runtime state):
 
 ---
 
-## 9. Verification checklist
+## 10. Verification checklist
 
-### 9.1 Start MongoDB, server and client
+### 10.1 Start MongoDB, server and client
 
 ```bash
 # MongoDB (pick one)
@@ -472,7 +614,7 @@ cd client && npm install && cp .env.example .env && npm run dev
 # -> http://localhost:5173 ; the health pill shows "Backend connected"
 ```
 
-### 9.2 Confirm the time-series collection exists
+### 10.2 Confirm the time-series collection exists
 
 ```bash
 mongosh "mongodb://127.0.0.1:27017/nexusflow"
@@ -488,7 +630,7 @@ db.telemetry.getIndexes()
 // _id_ ... and { name: 'device_timestamp', key: { 'metadata.deviceId': 1, timestamp: -1 } }
 ```
 
-### 9.3 Ingest a single reading and a batch
+### 10.3 Ingest a single reading and a batch
 
 ```bash
 # single
@@ -516,7 +658,7 @@ curl -i http://localhost:5000/api/health
 Rejections to expect: `400` with `{ "error": { "message": "Validation failed.", "details": [...] } }`
 for non-numeric `value`, a batch of 1,001 readings, or `from > to`.
 
-### 9.4 Verify the WebSocket endpoint
+### 10.4 Verify the WebSocket endpoint
 
 ```bash
 npx --yes wscat -c ws://localhost:5000/ws
@@ -531,7 +673,7 @@ curl -X POST http://localhost:5000/api/telemetry -H 'Content-Type: application/j
 > `npx wscat` needs registry access; the browser client also prints the connection state in the
 > inspector's **LIVE TELEMETRY** panel (`LIVE` / `CONNECTING` / `OFFLINE`).
 
-### 9.5 Save and load a graph from the UI
+### 10.5 Save and load a graph from the UI
 
 1. Open `http://localhost:5173`. The seed graph **Turbine Sensor → Moving Average → SMS Alert**
    is already on the canvas.
@@ -553,23 +695,25 @@ curl -X POST http://localhost:5000/api/telemetry -H 'Content-Type: application/j
    curl -X DELETE http://localhost:5000/api/graphs/<id> -i   # 204 No Content
    ```
 
-### 9.6 Automated tests
+### 10.6 Automated tests
 
 ```bash
 cd server
-npm test                 # vitest compiler suite + node:test HTTP/database suite
-npm run test:compiler    # 28 unit tests: validator, operators, stream compiler
-npm run test:http        # HTTP routes (validation, compile, compile-with-stubbed-model)
+npm test                 # vitest compiler suite + node:test HTTP/database/WS suite
+npm run test:compiler    # 44 unit tests: validator, operators, stream compiler,
+                         #   ruleExecutor routing/isolation, activity taps, cooldown
+npm run test:http        # HTTP routes (validation, compile, stubbed model) +
+                         #   WebSocket channel protocol (subscribe/unsubscribe/ingest/throttle)
 TEST_MONGODB_URI="mongodb://127.0.0.1:27017" npm test
 # the integration suite creates a throwaway database and asserts the time-series
 # options, the compound index, single/batch ingestion, the query endpoint,
 # graph CRUD and the WebSocket connected/telemetry messages
 
 cd ../client
-npm run build            # production build of the editor
+npm run build            # production build of the editor + dashboard
 ```
 
-### 9.7 Day 2: compile, test and deactivate a graph
+### 10.7 Day 2: compile, test and deactivate a graph
 
 ```bash
 # 1. Load the sample graph (Sensor -> MovingAverage(5) -> Threshold(>80) -> SMS Alert)
@@ -615,7 +759,7 @@ cd server && npm run simulate -- --devices 1 --interval 200
 mongosh "mongodb://127.0.0.1:27017/nexusflow" --eval 'db.alerts.find().sort({triggeredAt:-1}).limit(5)'
 ```
 
-### 9.8 Day 2: build and save the turbine graph in the UI
+### 10.8 Day 2: build and save the turbine graph in the UI
 
 1. `cd client && npm run dev` and open `http://localhost:5173`. The canvas starts with the
    Day 2 seed graph: **Sensor → Moving Average → Threshold → SMS Alert**.
@@ -636,15 +780,78 @@ mongosh "mongodb://127.0.0.1:27017/nexusflow" --eval 'db.alerts.find().sort({tri
    `curl -X POST localhost:5000/api/graphs -H 'Content-Type: application/json' -d @turbine-overheat-rule.json`
    then `curl -X POST localhost:5000/api/graphs/<id>/compile`.
 
+### 10.9 Day 3: live execution and the dashboard
+
+**Activate from the UI**
+
+1. Open the editor (`http://localhost:5173`), load or save the turbine graph, then press
+   **Activate** in the toolbar → the badge switches to `ACTIVE` (green pulse) and a toast confirms
+   the subscription count. The server logs nothing extra; the pipeline is now fed by `telemetryBus`.
+2. Press **Send test data** → six readings (4 normal + 2 × 96 °C spikes) go through the real
+   ingestion API. With the 5-reading average crossing 80 you get an alert toast on the dashboard
+   and the server logs `[sms -> +911234567890] ALERT turbine-001 ...`.
+3. Or run the simulator: `cd server && npm run simulate -- --devices 1 --interval 200 --spikes 0.3`.
+4. Open the **Dashboard** (nav pill, Editor | Dashboard) and pick `turbine-001` / `temperature`.
+
+**What to expect on the dashboard**
+
+* **Chart** — a rolling window of the last 60 points updating ~5×/second (messages are buffered
+  and flushed every 200 ms; Recharts animation is off). When an active graph has a threshold for
+  the selected device/sensor, a red dashed **reference line** (`threshold > 80`) is drawn.
+* **Stat cards** — latest / average / min / max over the window plus live messages/sec.
+* **Alert feed** — new alerts appear instantly, newest first, severity-coloured, with a
+  toast notification (auto-dismisses after 6 s). The feed is pre-filled from `GET /api/alerts`.
+* **Engine status** — active graphs, messages/sec, total processed and alerts fired, polled from
+  `GET /api/engine/status` every 5 s.
+* **Deactivate** in the editor → the badge returns to `INACTIVE`, `graph_status: "inactive"` is
+  broadcast, and the alert feed stops growing while the simulator keeps running.
+
+**Manual WebSocket test (wscat)**
+
+```bash
+npx wscat -c ws://localhost:5000/ws
+# then inside the wscat shell:
+> {"type":"subscribe","channels":["telemetry:turbine-001","alerts"]}
+< {"type":"subscribed","data":{"channels":["telemetry:turbine-001","alerts"]}}
+# start the simulator in another terminal; you should see (throttled) telemetry:
+< {"type":"telemetry","data":{"metadata":{"deviceId":"turbine-001",...},"value":52.31,"unit":"°C"}}
+# push a spike over the same socket:
+> {"type":"telemetry","data":{"timestamp":"2026-11-12T10:00:00.000Z","metadata":{"deviceId":"turbine-001","sensorType":"temperature","location":"wscat"},"value":97,"unit":"°C"}}
+< {"type":"ack","data":{"accepted":1,"timestamp":"2026-11-12T10:00:00.000Z"}}
+# if the turbine graph is active, an alert follows once the window average is > 80:
+< {"type":"alert","data":{"graphId":"...","deviceId":"turbine-001","value":87.8,"severity":"critical","message":"ALERT ..."}}
+# a client that never subscribed gets nothing:
+> {"type":"unsubscribe","channels":["alerts"]}   # now alerts stop, telemetry continues
+```
+
+**curl examples for the Day 3 APIs**
+
+```bash
+# recent alerts for one device (optionally &graphId=<id>)
+curl 'http://localhost:5000/api/alerts?deviceId=turbine-001&limit=10'
+
+# per-minute avg/min/max/count over the last 5 minutes (window: 30s | 5m | 2h | 1d)
+curl 'http://localhost:5000/api/telemetry/stats?deviceId=turbine-001&window=5m'
+# -> { "data": { "buckets": [ { "minute": "...", "avg": 61.2, "min": 45, "max": 99, "count": 30 }, ... ] } }
+
+# engine counters (what the dashboard panel polls)
+curl 'http://localhost:5000/api/engine/status'
+# -> { "data": { "activeGraphs": 1, "messagesProcessed": 1240, "messagesPerSecond": 18,
+#               "alertsFired": 7, "routedReadings": 1240, "routingErrors": 0, "uptimeSeconds": 92 } }
+
+# scripted end-to-end check: activate -> spike series -> compare alerts vs expected
+cd server && npm run engine-check
+```
+
 ---
 
-## 10. Files
+## 11. Files
 
 Every file's complete source, in the same order as the folder tree above, is collected in
 [`CODE.md`](CODE.md). [`DAY2-FILES.md`](DAY2-FILES.md) contains only the files that were added or
-modified on Day 2.
+modified on Day 2; [`DAY3-FILES.md`](DAY3-FILES.md) does the same for Day 3 (live execution).
 
-## 11. Notes on this build
+## 12. Notes on this build
 
 * Ingestion acknowledgment is tied to a successful database write; the WebSocket broadcast is
   separate and best-effort by design.

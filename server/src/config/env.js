@@ -10,6 +10,12 @@ const envSchema = z.object({
     (value) => (value === '' || value === undefined ? undefined : value),
     z.coerce.number().int().positive().optional(),
   ),
+  // Per-node activity taps (Day 4 glowing wires). On by default; set to false in
+  // production runs that do not need instrumentation.
+  NODE_ACTIVITY_ENABLED: z.union([z.boolean(), z.string()]).optional()
+    .transform((value) => (value === undefined
+      ? true
+      : !['false', '0', 'no', 'off'].includes(String(value).toLowerCase()))),
 });
 
 const result = envSchema.safeParse(process.env);
@@ -24,4 +30,5 @@ export const env = {
   mongoUri: result.data.MONGODB_URI,
   clientOrigins: result.data.CLIENT_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean),
   telemetryRetentionSeconds: result.data.TELEMETRY_RETENTION_SECONDS,
+  nodeActivityEnabled: result.data.NODE_ACTIVITY_ENABLED,
 };

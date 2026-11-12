@@ -1,52 +1,49 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useWebSocket } from '../ws/WebSocketProvider.jsx';
+import { useChannel } from '../ws/useChannel.js';
 
-/** Same-origin WebSocket, with bounded UI updates and automatic reconnect. */
+/**
+ * Same-origin live telemetry for the editor inspector.
+ *
+ * Day 3: the server no longer blanket-broadcasts — this hook now subscribes to the
+ * catch-all `telemetry` channel through the shared WebSocket provider, so it shares
+ * one socket (and one reconnect loop) with the rest of the app.
+ *
+ * Incoming messages are buffered in a ref and flushed into state at most every
+ * 500 ms (same bounded-update behaviour as Day 1), keeping the editor render path
+ * cheap even under a hot device stream.
+ */
 export function useTelemetry() {
+  const ws = useWebSocket();
   const [socketStatus, setSocketStatus] = useState('connecting');
   const [readings, setReadings] = useState([]);
+  const pendingRef = useRef([]);
+  const flushTimerRef = useRef(null);
 
   useEffect(() => {
-    let socket;
-    let retry;
-    let disposed = false;
-    let attempts = 0;
-    let pending = [];
-    const flush = setInterval(() => {
-      if (pending.length) {
-        setReadings(pending.slice(-3).reverse());
-        pending = [];
-      }
-    }, 500);
+    setSocketStatus(ws?.status ?? 'connecting');
+  }, [ws?.status]);
 
-    function connect() {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
-      socket.onopen = () => { attempts = 0; if (!disposed) setSocketStatus('connected'); };
-      socket.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-          if (message.type === 'telemetry') {
-            const received = Array.isArray(message.data) ? message.data : [message.data];
-            pending = [...pending, ...received.slice(-3)].slice(-3);
-          }
-        } catch { /* Ignore malformed messages from the server. */ }
-      };
-      socket.onerror = () => socket.close();
-      socket.onclose = () => {
-        if (disposed) return;
-        setSocketStatus('disconnected');
-        const delay = Math.min(1000 * 2 ** attempts, 30_000);
-        attempts += 1;
-        retry = setTimeout(connect, delay);
-      };
-    }
-    connect();
-    return () => {
-      disposed = true;
-      clearInterval(flush);
-      clearTimeout(retry);
-      socket?.close();
-    };
+  const flush = useCallback(() => {
+    flushTimerRef.current = null;
+    const pending = pendingRef.current;
+    if (pending.length === 0) return;
+    pendingRef.current = [];
+    // Newest first, bounded to the 3 rows the inspector renders.
+    setReadings((current) => [...pending.reverse(), ...current].slice(0, 3));
   }, []);
+
+  const onTelemetry = useCallback((message) => {
+    const received = Array.isArray(message.data) ? message.data : [message.data];
+    for (const reading of received) {
+      if (reading && typeof reading === 'object') pendingRef.current.push(reading);
+    }
+    if (pendingRef.current.length > 24) pendingRef.current = pendingRef.current.slice(-12);
+    if (flushTimerRef.current === null) flushTimerRef.current = setTimeout(flush, 500);
+  }, [flush]);
+  useChannel('telemetry', onTelemetry);
+
+  useEffect(() => () => clearTimeout(flushTimerRef.current), []);
+
   return { socketStatus, readings };
 }

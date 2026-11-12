@@ -37,3 +37,18 @@ export const telemetryQuerySchema = z.object({
   message: 'from must be earlier than or equal to to.',
   path: ['from'],
 });
+
+const WINDOW_UNITS = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+
+/**
+ * GET /api/telemetry/stats?deviceId=&window=5m
+ * `window` accepts a suffix of s/m/h/d (default 5m) and is converted to milliseconds.
+ */
+export const statsQuerySchema = z.object({
+  deviceId: boundedText.optional(),
+  window: z.string().trim().regex(/^\d{1,5}[smhd]$/, 'window must look like 30s, 5m, 2h or 1d.').default('5m'),
+}).strict().transform((query) => {
+  const amount = Number.parseInt(query.window, 10);
+  const unit = query.window.slice(-1);
+  return { deviceId: query.deviceId, windowMs: amount * WINDOW_UNITS[unit] };
+});

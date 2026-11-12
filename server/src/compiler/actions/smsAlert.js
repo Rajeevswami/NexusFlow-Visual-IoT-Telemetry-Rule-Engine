@@ -1,6 +1,6 @@
 import { registerNode } from '../nodeRegistry.js';
 import { recordAlert } from '../../services/alertService.js';
-import { renderTemplate } from './template.js';
+import { cooldownErrors, renderTemplate } from './template.js';
 
 const DEFAULT_TEMPLATE = 'ALERT ${deviceId} ${sensorType} = ${value}${unit}';
 
@@ -51,7 +51,7 @@ registerNode({
   type: 'smsAlert',
   category: 'action',
   label: 'SMS Alert',
-  defaults: { phone: '+10000000000', messageTemplate: DEFAULT_TEMPLATE },
+  defaults: { phone: '+10000000000', messageTemplate: DEFAULT_TEMPLATE, cooldownSeconds: 0 },
   validate(config) {
     const errors = [];
     if (config.phone !== undefined) {
@@ -61,6 +61,7 @@ registerNode({
     if (config.messageTemplate !== undefined && String(config.messageTemplate).length > 240) {
       errors.push('messageTemplate must be 240 characters or fewer.');
     }
+    errors.push(...cooldownErrors(config));
     return errors;
   },
   createAction: createSmsAction,

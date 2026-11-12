@@ -20,6 +20,21 @@ export const graphApi = {
   test: (id, values) => api.post(`/graphs/${encodeURIComponent(id)}/test`, { values }),
 };
 
+export const telemetryApi = {
+  /** Recent alerts: `?graphId=&deviceId=&limit=` */
+  alerts: (params = {}) => api.get('/alerts', { params }),
+  /** Per-minute buckets: `?deviceId=&window=5m` (avg/min/max/count). */
+  stats: (params = {}) => api.get('/telemetry/stats', { params }),
+  /** Ingest readings (the "Send Test Data" button and manual curl tests). */
+  ingestBatch: (readings) => api.post('/telemetry/batch', readings),
+  readings: (params = {}) => api.get('/telemetry', { params }),
+};
+
+export const engineApi = {
+  /** { activeGraphs, messagesProcessed, messagesPerSecond, alertsFired } */
+  status: () => api.get('/engine/status'),
+};
+
 export function errorMessage(error) {
   return error.response?.data?.error?.message
     || (error.code === 'ECONNABORTED' ? 'The request timed out.' : 'Cannot reach the backend. Check that the server and MongoDB are running.');

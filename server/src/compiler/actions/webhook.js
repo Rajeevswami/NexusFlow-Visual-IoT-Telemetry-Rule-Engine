@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { registerNode } from '../nodeRegistry.js';
 import { recordAlert } from '../../services/alertService.js';
-import { renderTemplate } from './template.js';
+import { cooldownErrors, renderTemplate } from './template.js';
 
 const METHODS = ['POST', 'PUT', 'PATCH'];
 const TIMEOUT_MS = 3000;
@@ -80,7 +80,7 @@ registerNode({
   type: 'webhook',
   category: 'action',
   label: 'Webhook',
-  defaults: { url: 'https://example.com/hook', method: 'POST' },
+  defaults: { url: 'https://example.com/hook', method: 'POST', cooldownSeconds: 0 },
   validate(config) {
     const errors = [];
     if (config.url !== undefined) {
@@ -94,6 +94,7 @@ registerNode({
     if (config.method !== undefined && !METHODS.includes(String(config.method).toUpperCase())) {
       errors.push(`method must be one of ${METHODS.join(', ')}.`);
     }
+    errors.push(...cooldownErrors(config));
     return errors;
   },
   createAction: createWebhookAction,

@@ -1,6 +1,6 @@
 import { registerNode } from '../nodeRegistry.js';
 import { recordAlert } from '../../services/alertService.js';
-import { renderTemplate } from './template.js';
+import { cooldownErrors, renderTemplate } from './template.js';
 
 /**
  * Console action — the cheapest way to see a pipeline working during development
@@ -45,10 +45,11 @@ registerNode({
   type: 'log',
   category: 'action',
   label: 'Log',
-  defaults: { label: 'pipeline', template: '${deviceId} ${sensorType} = ${value}${unit}' },
+  defaults: { label: 'pipeline', template: '${deviceId} ${sensorType} = ${value}${unit}', cooldownSeconds: 0 },
   validate(config) {
     const errors = [];
     if (config.label !== undefined && String(config.label).length > 60) errors.push('label must be 60 characters or fewer.');
+    errors.push(...cooldownErrors(config));
     return errors;
   },
   createAction: createLogAction,

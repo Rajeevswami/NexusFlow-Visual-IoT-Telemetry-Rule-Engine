@@ -5,6 +5,7 @@ import { connectDatabase } from './config/db.js';
 import { env } from './config/env.js';
 import { attachWebSocketServer } from './services/websocket.js';
 import { activeGraphManager } from './services/activeGraphManager.js';
+import { ruleExecutor } from './services/ruleExecutor.js';
 
 let server;
 let sockets;
@@ -21,8 +22,9 @@ async function shutdown(signal) {
     sockets.close();
   }
   if (server?.listening) await new Promise((resolve) => server.close(resolve));
-  // Release every compiled pipeline before the process exits.
+  // Release every compiled pipeline and detach the rule engine before the process exits.
   activeGraphManager.disposeAll();
+  ruleExecutor.stop();
   await mongoose.disconnect();
   clearTimeout(forceExit);
 }
@@ -34,6 +36,8 @@ try {
   await connectDatabase();
   server = http.createServer(app);
   sockets = attachWebSocketServer(server);
+  // Attach the rule engine to the telemetry bus before the first reading arrives.
+  ruleExecutor.start();
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(env.port, '0.0.0.0', resolve);

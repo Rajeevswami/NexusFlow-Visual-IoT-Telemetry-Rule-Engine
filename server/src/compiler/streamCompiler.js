@@ -1,4 +1,4 @@
-import { EMPTY, Subject, catchError, concatMap, of, share } from 'rxjs';
+import { EMPTY, Subject, catchError, concatMap, of, share, tap } from 'rxjs';
 import { getNode, listNodes, resolveConfig } from './nodeRegistry.js';
 import { validateGraph } from './graphValidator.js';
 // Importing the node modules is what populates the registry.
@@ -45,13 +45,24 @@ export function toEvent(reading = {}) {
  *   5. `dispose()` unsubscribes everything so graphs can be swapped at runtime.
  *
  * @param {object} graph raw React Flow JSON `{ nodes, edges }`
- * @param {{ graphId?: string | null, dryRun?: boolean, onAlert?: (result: object) => void }} [options]
+ * @param {{ graphId?: string | null, dryRun?: boolean, onAlert?: (result: object) => void,
+ *           trackActivity?: boolean, onActivity?: (activity: object) => void }} [options]
  *   `dryRun` compiles the pipeline but never sends an SMS, calls a webhook or writes to the
  *   database; fired alerts are collected and returned by `getAlerts()`.
+ *   `trackActivity` inserts a throttled `tap()` on every node that reports
+ *   `{ graphId, nodeId, value }` to `onActivity` — off by default so production runs
+ *   pay nothing for instrumentation.
  * @returns {object} compiled pipeline handle
  */
 export function compileGraph(graph, options = {}) {
-  const { graphId = null, dryRun = false, onAlert = null } = options;
+  const {
+    graphId = null,
+    dryRun = false,
+    onAlert = null,
+    trackActivity = false,
+    onActivity = null,
+  } = options;
+  const emitActivity = trackActivity && typeof onActivity === 'function';
 
   const validation = validateGraph(graph);
   if (!validation.ok) throw new GraphValidationError(validation.errors, validation.warnings);
@@ -116,6 +127,17 @@ export function compileGraph(graph, options = {}) {
       }
     }
 
+    // Optional instrumentation: one tap per node reports values to the activity bus
+    // (throttled downstream by the WebSocket layer). Zero cost when trackActivity is off.
+    if (emitActivity) {
+      stream$ = stream$.pipe(
+        tap((event) => {
+          try { onActivity({ graphId, nodeId, value: event?.value, timestamp: new Date() }); }
+          catch { /* an activity listener must never break the pipeline */ }
+        }),
+      );
+    }
+
     // Fan-out: share one upstream subscription between all children.
     if (children.get(nodeId).length > 1) stream$ = stream$.pipe(share());
 
@@ -130,10 +152,38 @@ export function compileGraph(graph, options = {}) {
 
     const config = resolveConfig(node.type, node.config);
     const context = { graphId, nodeId: node.id, dryRun, type: node.type };
-    const handler = node.definition.createAction(config, context);
+    const rawHandler = node.definition.createAction(config, context);
+
+    // Optional per-device cooldown (config `cooldownSeconds`, default 0 = disabled):
+    // while the window is open the handler is never called, so nothing is persisted,
+    // broadcast or sent — this is what stops alert spam during a sustained spike.
+    const cooldownMs = Math.max(0, Number(config.cooldownSeconds) || 0) * 1000;
+    const lastFiredAt = new Map(); // deviceId -> epoch ms
+    const handler = cooldownMs > 0
+      ? (event) => {
+        const key = event?.deviceId ?? '*';
+        const now = Date.now();
+        const previous = lastFiredAt.get(key);
+        if (previous !== undefined && now - previous < cooldownMs) return null; // suppressed
+        lastFiredAt.set(key, now);
+        return rawHandler(event);
+      }
+      : rawHandler;
+
     const input$ = buildStream(parentId);
 
-    const actionStream$ = input$.pipe(
+    // Activity tap for the action itself: it only sees the events that actually reach
+    // the action (i.e. the ones that passed every upstream condition).
+    const actionInput$ = emitActivity
+      ? input$.pipe(
+        tap((event) => {
+          try { onActivity({ graphId, nodeId: node.id, value: event?.value, timestamp: new Date() }); }
+          catch { /* an activity listener must never break the pipeline */ }
+        }),
+      )
+      : input$;
+
+    const actionStream$ = actionInput$.pipe(
       // concatMap keeps events in order even when a handler is asynchronous.
       concatMap((event) => of(event).pipe(
         concatMap((value) => Promise.resolve()
@@ -161,6 +211,7 @@ export function compileGraph(graph, options = {}) {
 
     subscriptions.push(actionStream$.subscribe({
       next: (result) => {
+        if (result == null) return; // cooldown suppressed this firing (null sentinel)
         if (dryRun) alerts.push(result);
         try {
           onAlert?.(result);
