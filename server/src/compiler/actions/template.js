@@ -22,6 +22,22 @@ export function renderTemplate(template, event = {}) {
   return template.replace(/\$\{\s*(\w+)\s*\}/g, (match, key) => (key in values ? String(values[key]) : match));
 }
 
+/**
+ * Shared validation for the optional `cooldownSeconds` action setting
+ * (0 = disabled, max 24 h). Enforced centrally by the stream compiler.
+ * @param {{ cooldownSeconds?: unknown }} config
+ * @returns {string[]} human-readable issues
+ */
+export function cooldownErrors(config) {
+  const { cooldownSeconds } = config;
+  if (cooldownSeconds === undefined) return [];
+  if (typeof cooldownSeconds !== 'number' || !Number.isFinite(cooldownSeconds)
+    || !Number.isInteger(cooldownSeconds) || cooldownSeconds < 0 || cooldownSeconds > 86_400) {
+    return ['cooldownSeconds must be an integer between 0 and 86400 (24 h).'];
+  }
+  return [];
+}
+
 export function defaultMessage(event = {}) {
   const unit = event.unit ? ` ${event.unit}` : '';
   return `Alert: ${event.deviceId ?? 'unknown-device'} ${event.sensorType ?? ''} = ${formatNumber(event.value)}${unit}`.trim();

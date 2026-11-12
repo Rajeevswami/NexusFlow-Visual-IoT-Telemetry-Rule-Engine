@@ -9,9 +9,10 @@ import FlowInspector from '../components/FlowInspector.jsx';
 import GraphPicker from '../components/GraphPicker.jsx';
 import Navbar from '../components/layout/Navbar.jsx';
 import ValidationPanel from '../components/ValidationPanel.jsx';
-import { errorMessage, graphApi } from '../services/api.js';
+import { errorMessage, graphApi, telemetryApi } from '../services/api.js';
 import { copyText, downloadJson, graphFilename, serializeGraph, toJsonString } from '../services/graphSerializer.js';
 import { useTelemetry } from '../services/useTelemetry.js';
+import { useChannel } from '../ws/useChannel.js';
 
 /** Dimensions of a node card, used to centre a dropped node under the cursor. */
 const NODE_OFFSET = { x: 130, y: 46 };
@@ -30,12 +31,29 @@ export default function EditorPage() {
   const [listError, setListError] = useState('');
   const [loadingId, setLoadingId] = useState('');
   const [notice, setNotice] = useState(null);
+  // ---------------------------------------------------------- live activation
+  const [graphId, setGraphId] = useState('');
+  const [activation, setActivation] = useState({ status: 'inactive', message: '' });
+  const [activating, setActivating] = useState(false);
+  const [testing, setTesting] = useState(false);
   const canvasRef = useRef(null);
   const nameRef = useRef(null);
   const exportRef = useRef('');
   const flow = useReactFlow();
   const { socketStatus, readings } = useTelemetry();
   const selectedNode = nodes.find((node) => node.selected);
+
+  // Live pipeline status pushed by the server (`graph_status` on activate/deactivate/error).
+  useChannel(graphId ? `graph:${graphId}` : null, useCallback((message) => {
+    if (message.type !== 'graph_status' || !message.data) return;
+    const { status } = message.data;
+    setActivation((current) => {
+      if (status === 'active') return { status: 'active', message: 'Pipeline is evaluating live telemetry.' };
+      if (status === 'error') return { status: 'error', message: 'Activation failed.' };
+      if (current.status !== 'inactive') return { status: 'inactive', message: 'Pipeline deactivated.' };
+      return current;
+    });
+  }, []));
 
   // ------------------------------------------------------------- backend health
   useEffect(() => {
@@ -117,9 +135,11 @@ export default function EditorPage() {
     try {
       const { viewport } = flow.toObject();
       const payload = serializeGraph(name, nodes, edges, viewport);
-      await graphApi.create(payload);
+      const created = await graphApi.create(payload);
+      setGraphId(created.data.data._id);
+      setActivation({ status: 'inactive', message: '' });
       setName(payload.name);
-      setNotice({ type: 'success', message: `Graph saved with ${payload.nodes.length} nodes and ${payload.edges.length} edges.` });
+      setNotice({ type: 'success', message: `Graph saved with ${payload.nodes.length} nodes and ${payload.edges.length} edges. Ready to Activate.` });
     } catch (error) {
       setNotice({ type: 'error', message: errorMessage(error) });
     } finally {
@@ -146,6 +166,16 @@ export default function EditorPage() {
       // Saved edges carry no `type`; re-apply the canvas default so the round trip is seamless.
       setEdges((graph.edges ?? []).map((edge) => ({ type: 'smoothstep', ...edge })));
       setName(graph.name ?? 'Untitled graph');
+      setGraphId(id);
+      setActivation({ status: 'inactive', message: '' });
+      // A loaded graph may already be running — ask the engine so the badge is correct.
+      graphApi.active()
+        .then((response) => {
+          if (response.data.data.some((entry) => entry.graphId === id)) {
+            setActivation({ status: 'active', message: 'Pipeline is evaluating live telemetry.' });
+          }
+        })
+        .catch(() => { /* engine status is best-effort */ });
       setValidation(null);
       setPickerOpen(false);
       requestAnimationFrame(() => {
@@ -206,6 +236,76 @@ export default function EditorPage() {
     setNotice({ type: 'error', message: reason ?? 'That connection is not allowed.' });
   }, []);
 
+  // ------------------------------------------------------- activate / deactivate
+  async function activateGraph() {
+    if (!graphId) {
+      setNotice({ type: 'error', message: 'Save the graph first — activation runs the saved version.' });
+      return;
+    }
+    setActivating(true);
+    try {
+      const response = await graphApi.compile(graphId);
+      const data = response.data.data;
+      setActivation({ status: 'active', message: `Evaluating ${data.sources?.length ?? 0} source(s) live.` });
+      setNotice({ type: 'success', message: `Pipeline active — ${data.nodeCount} nodes, ${data.subscriptions} subscription(s). Watch the Dashboard.` });
+    } catch (error) {
+      const details = error.response?.data?.error?.details;
+      setActivation({ status: 'error', message: errorMessage(error) });
+      setNotice({
+        type: 'error',
+        message: details?.length ? `Activation failed: ${details[0].message}` : errorMessage(error),
+      });
+    } finally {
+      setActivating(false);
+    }
+  }
+
+  async function deactivateGraph() {
+    if (!graphId) return;
+    try {
+      await graphApi.deactivate(graphId);
+      setActivation({ status: 'inactive', message: 'Pipeline deactivated.' });
+      setNotice({ type: 'success', message: 'Pipeline deactivated — rule evaluation stopped.' });
+    } catch (error) {
+      // 404 means it was not running anyway; treat as inactive.
+      if (error.response?.status === 404) setActivation({ status: 'inactive', message: 'Pipeline was not active.' });
+      else setNotice({ type: 'error', message: errorMessage(error) });
+    }
+  }
+
+  /**
+   * Push sample readings (a few normal values + overheat spikes) through the real
+   * ingestion API so the user sees the rule fire from the UI without the simulator.
+   */
+  async function sendTestData() {
+    const source = nodes.find((node) => node.type === 'sensor' || node.data?.category === 'source');
+    const config = source?.data?.config ?? {};
+    const deviceId = config.deviceId || 'turbine-001';
+    const sensorType = config.sensorType || 'temperature';
+    const location = 'Test bench';
+    const now = Date.now();
+    const values = [50, 52, 48, 96, 51, 97]; // spike above the default threshold (>80)
+    const readings = values.map((value, index) => ({
+      timestamp: new Date(now - (values.length - index) * 250).toISOString(),
+      metadata: { deviceId, sensorType, location },
+      value,
+      unit: '°C',
+    }));
+
+    setTesting(true);
+    try {
+      const response = await telemetryApi.ingestBatch(readings);
+      setNotice({
+        type: 'success',
+        message: `Sent ${response.data.accepted} readings for ${deviceId} · ${sensorType} (2 overheat spikes). Check the Dashboard${activation.status === 'active' ? ' — the rule should fire' : ' after activating this graph'}.`,
+      });
+    } catch (error) {
+      setNotice({ type: 'error', message: errorMessage(error) });
+    } finally {
+      setTesting(false);
+    }
+  }
+
   return (
     <div className="app-shell">
       <Navbar
@@ -216,6 +316,12 @@ export default function EditorPage() {
         onExport={exportJson}
         saving={saving}
         validating={validating}
+        activation={activation}
+        onActivate={activateGraph}
+        onDeactivate={deactivateGraph}
+        onSendTestData={sendTestData}
+        activating={activating}
+        testing={testing}
       />
 
       <div className="editor-body">

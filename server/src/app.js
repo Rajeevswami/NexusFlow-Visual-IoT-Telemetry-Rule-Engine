@@ -5,6 +5,8 @@ import morgan from 'morgan';
 import mongoose from 'mongoose';
 import { env } from './config/env.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
+import alertRoutes from './routes/alertRoutes.js';
+import engineRoutes from './routes/engineRoutes.js';
 import graphRoutes from './routes/graphRoutes.js';
 import telemetryRoutes from './routes/telemetryRoutes.js';
 
@@ -24,6 +26,8 @@ app.get('/api/health', (req, res) => {
 });
 app.use('/api/telemetry', telemetryRoutes);
 app.use('/api/graphs', graphRoutes);
+app.use('/api/alerts', alertRoutes);
+app.use('/api/engine', engineRoutes);
 app.use(notFound);
 app.use(errorHandler);
 

@@ -1,6 +1,7 @@
 import { Graph } from '../models/Graph.js';
 import { compileGraph, validateGraph, GraphValidationError } from '../compiler/index.js';
 import { activeGraphManager } from '../services/activeGraphManager.js';
+import { broadcastGraphStatus } from '../services/websocket.js';
 import { httpError } from '../utils/httpError.js';
 
 export async function createGraph(req, res) {
@@ -70,8 +71,10 @@ export async function compileGraphHandler(req, res) {
     });
   } catch (error) {
     if (error instanceof GraphValidationError) {
+      broadcastGraphStatus(id, 'error');
       return res.status(400).json({ error: { message: 'Graph is not valid.', details: error.errors, warnings: error.warnings } });
     }
+    broadcastGraphStatus(id, 'error');
     throw error;
   }
 }

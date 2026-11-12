@@ -1,7 +1,10 @@
 import { Graph } from '../models/Graph.js';
 import { compileGraph } from '../compiler/index.js';
 import { httpError } from '../utils/httpError.js';
-import { broadcastAlert } from './websocket.js';
+import { env } from '../config/env.js';
+import { broadcastAlert, broadcastGraphStatus, broadcastNodeActivity } from './websocket.js';
+import { ruleExecutor } from './ruleExecutor.js';
+import { telemetryBus } from './telemetryBus.js';
 
 /**
  * Holds the compiled pipelines that are currently running, keyed by graph id.
@@ -29,7 +32,14 @@ class ActiveGraphManager {
       { nodes: graph.nodes ?? [], edges: graph.edges ?? [] },
       {
         graphId: id,
-        onAlert: (alert) => broadcastAlert({ graphId: id, ...alert }),
+        onAlert: (alert) => {
+          telemetryBus.recordAlertFired();
+          broadcastAlert({ graphId: id, ...alert });
+        },
+        // Optional per-node activity taps (Day 4 glowing wires); disabled in production
+        // runs unless NODE_ACTIVITY_ENABLED=true.
+        trackActivity: env.nodeActivityEnabled,
+        onActivity: (activity) => broadcastNodeActivity(activity),
       },
     );
 
@@ -46,6 +56,9 @@ class ActiveGraphManager {
       activatedAt: new Date(),
     };
     this.#pipelines.set(id, entry);
+    // Route live telemetry to this graph through the rule executor (O(1) key lookup).
+    ruleExecutor.register({ graphId: id, sources: compiled.sources, publish: compiled.publish });
+    broadcastGraphStatus(id, 'active');
     return entry;
   }
 
@@ -63,6 +76,9 @@ class ActiveGraphManager {
       console.error(`Failed to dispose pipeline ${graphId}: ${error.message}`);
     }
     this.#pipelines.delete(graphId);
+    // Stop routing live telemetry to this graph and tell subscribers it is gone.
+    try { ruleExecutor.unregister(graphId); } catch (error) { console.error(`Failed to unregister ${graphId}: ${error.message}`); }
+    broadcastGraphStatus(graphId, 'inactive');
     return true;
   }
 

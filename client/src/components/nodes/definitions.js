@@ -86,10 +86,11 @@ export const NODE_TYPES = {
     icon: BellRing,
     hasInput: true,
     hasOutput: false,
-    defaultConfig: { phone: '+911234567890', messageTemplate: 'ALERT ${deviceId} ${sensorType} = ${value}${unit}' },
+    defaultConfig: { phone: '+911234567890', messageTemplate: 'ALERT ${deviceId} ${sensorType} = ${value}${unit}', cooldownSeconds: 0 },
     fields: [
       { key: 'phone', label: 'Phone', type: 'text', placeholder: '+911234567890' },
       { key: 'messageTemplate', label: 'Message', type: 'text', placeholder: 'ALERT ${deviceId} = ${value}${unit}' },
+      { key: 'cooldownSeconds', label: 'Cooldown (s)', type: 'number', min: 0, max: 86400, step: 1 },
     ],
   },
   webhook: {
@@ -101,10 +102,11 @@ export const NODE_TYPES = {
     icon: Webhook,
     hasInput: true,
     hasOutput: false,
-    defaultConfig: { url: 'https://example.com/hook', method: 'POST' },
+    defaultConfig: { url: 'https://example.com/hook', method: 'POST', cooldownSeconds: 0 },
     fields: [
       { key: 'url', label: 'URL', type: 'text', placeholder: 'https://example.com/hook' },
       { key: 'method', label: 'Method', type: 'select', options: ['POST', 'PUT', 'PATCH'] },
+      { key: 'cooldownSeconds', label: 'Cooldown (s)', type: 'number', min: 0, max: 86400, step: 1 },
     ],
   },
   log: {
@@ -116,10 +118,11 @@ export const NODE_TYPES = {
     icon: ScrollText,
     hasInput: true,
     hasOutput: false,
-    defaultConfig: { label: 'pipeline', template: '${deviceId} ${sensorType} = ${value}${unit}' },
+    defaultConfig: { label: 'pipeline', template: '${deviceId} ${sensorType} = ${value}${unit}', cooldownSeconds: 0 },
     fields: [
       { key: 'label', label: 'Prefix', type: 'text', placeholder: 'pipeline' },
       { key: 'template', label: 'Template', type: 'text', placeholder: '${deviceId} = ${value}${unit}' },
+      { key: 'cooldownSeconds', label: 'Cooldown (s)', type: 'number', min: 0, max: 86400, step: 1 },
     ],
   },
 };

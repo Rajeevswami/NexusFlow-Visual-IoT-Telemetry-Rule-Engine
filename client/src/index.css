@@ -1566,3 +1566,509 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ===========================================================================
+   Day 3 — live execution: navigation, activation controls, live dashboard
+   =========================================================================== */
+
+@layer components {
+  /* ---------------- Route navigation (Editor | Dashboard) ---------------- */
+  .route-nav {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: #fff;
+  }
+
+  .route-nav a {
+    padding: 5px 14px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-soft);
+    text-decoration: none;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+
+  .route-nav a:hover {
+    color: var(--ink);
+  }
+
+  .route-nav a.active {
+    background: var(--teal);
+    color: #fff;
+  }
+
+  /* ---------------- Activation status badge ---------------- */
+  .engine-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+  }
+
+  .engine-badge i {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: #b6c4c3;
+  }
+
+  .engine-badge-active {
+    border-color: #bfe3d1;
+    color: #1f7a52;
+  }
+
+  .engine-badge-active i {
+    background: #2f9e6d;
+    box-shadow: 0 0 0 3px rgba(47, 158, 109, 0.18);
+    animation: badge-pulse 1.6s ease-in-out infinite;
+  }
+
+  .engine-badge-error {
+    border-color: #f0cfc5;
+    color: #b9523a;
+  }
+
+  .engine-badge-error i {
+    background: #d7654f;
+  }
+
+  @keyframes badge-pulse {
+    50% { box-shadow: 0 0 0 5px rgba(47, 158, 109, 0.08); }
+  }
+
+  /* ---------------- Dashboard shell ---------------- */
+  .dashboard-page {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+    overflow-y: auto;
+  }
+
+  .dashboard-topbar {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 12px 22px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    box-shadow: var(--shadow-panel);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+
+  .dashboard-topbar-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-left: auto;
+  }
+
+  .dashboard-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px 22px 28px;
+    width: min(1280px, 100%);
+    margin: 0 auto;
+    flex: 1 1 auto;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-panel);
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .panel-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .panel-title svg {
+    color: var(--teal);
+  }
+
+  .panel-meta {
+    font-size: 11px;
+    color: var(--ink-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  /* ---------------- Controls ---------------- */
+  .dashboard-controls {
+    display: flex;
+    align-items: flex-end;
+    gap: 18px;
+    padding: 14px 16px;
+    flex-wrap: wrap;
+  }
+
+  .control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .control-group label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  .control-group select {
+    min-width: 180px;
+    padding: 8px 11px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .control-info span {
+    font-size: 12px;
+    color: var(--ink-soft);
+  }
+
+  .control-error {
+    font-size: 12px;
+    color: #b9523a;
+  }
+
+  .threshold-chip {
+    margin-left: auto;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: #fbeae5;
+    border: 1px solid #f0cfc5;
+    color: #b9523a;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  /* ---------------- Dashboard grid ---------------- */
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+    grid-template-areas:
+      'chart stats'
+      'alerts engine';
+    gap: 14px;
+  }
+
+  .chart-panel { grid-area: chart; min-width: 0; }
+  .stat-cards { grid-area: stats; }
+  .alert-feed { grid-area: alerts; }
+  .engine-status { grid-area: engine; }
+
+  .chart-shell {
+    width: 100%;
+    padding: 12px 8px 8px 0;
+  }
+
+  /* ---------------- Stat cards ---------------- */
+  .stat-cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    align-content: start;
+  }
+
+  .dash-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 13px 15px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-panel);
+  }
+
+  .dash-stat small {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  .dash-stat strong {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+
+  .dash-stat strong em {
+    font-style: normal;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-soft);
+  }
+
+  .dash-stat-live {
+    border-color: #bfe3d1;
+    background: linear-gradient(180deg, #f2fbf7, var(--panel));
+  }
+
+  .dash-stat-live strong {
+    color: #1f7a52;
+  }
+
+  .dash-stat:last-child:nth-child(odd) {
+    grid-column: span 2;
+  }
+
+  /* ---------------- Alert feed ---------------- */
+  .alert-feed {
+    display: flex;
+    flex-direction: column;
+    min-height: 260px;
+    max-height: 420px;
+  }
+
+  .alert-list {
+    margin: 0;
+    padding: 8px;
+    list-style: none;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .alert-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 11px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: #fff;
+    animation: alert-in 0.18s ease-out;
+  }
+
+  @keyframes alert-in {
+    from { opacity: 0; transform: translateY(-6px); }
+  }
+
+  .alert-severity-icon {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    flex: 0 0 auto;
+  }
+
+  .alert-row.severity-critical {
+    border-color: #f0cfc5;
+    background: #fdf6f4;
+  }
+
+  .alert-row.severity-critical .alert-severity-icon {
+    background: #f9ded6;
+    color: #b9523a;
+  }
+
+  .alert-row.severity-warning {
+    border-color: #f3e0bd;
+    background: #fdfaf3;
+  }
+
+  .alert-row.severity-warning .alert-severity-icon {
+    background: #f8ecd2;
+    color: #9a6b12;
+  }
+
+  .alert-row.severity-info .alert-severity-icon {
+    background: var(--teal-soft);
+    color: var(--teal);
+  }
+
+  .alert-copy {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .alert-copy strong {
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .alert-copy small {
+    font-size: 12px;
+    color: var(--ink-soft);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .alert-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 3px;
+    flex: 0 0 auto;
+  }
+
+  .alert-meta em {
+    font-style: normal;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  .alert-meta time {
+    font-size: 11px;
+    color: var(--ink-soft);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .alert-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 34px 18px;
+    text-align: center;
+    color: var(--ink-soft);
+  }
+
+  .alert-empty strong {
+    font-size: 13px;
+    color: var(--ink);
+  }
+
+  .alert-empty p {
+    margin: 0;
+    font-size: 12px;
+    max-width: 300px;
+  }
+
+  /* ---------------- Engine status ---------------- */
+  .engine-status {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .engine-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    padding: 14px;
+  }
+
+  .engine-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 11px 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+  }
+
+  .engine-cell svg {
+    color: var(--teal);
+  }
+
+  .engine-cell strong {
+    font-size: 19px;
+    font-weight: 700;
+  }
+
+  .engine-cell small {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  .engine-error {
+    padding: 16px;
+    font-size: 12px;
+    color: #b9523a;
+  }
+
+  .engine-footer {
+    margin-top: auto;
+    padding: 10px 16px;
+    border-top: 1px solid var(--line);
+    font-size: 11px;
+    color: var(--ink-soft);
+  }
+
+  /* ---------------- Alert toast ---------------- */
+  .alert-toast {
+    left: auto;
+    right: 22px;
+    transform: none;
+    max-width: 420px;
+    animation: alert-toast-in 0.18s ease-out;
+  }
+
+  .alert-toast strong {
+    font-weight: 700;
+  }
+
+  .alert-toast-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: currentColor;
+    flex: 0 0 auto;
+    animation: badge-pulse 1.4s ease-in-out infinite;
+  }
+
+  @keyframes alert-toast-in {
+    from { opacity: 0; transform: translateY(-8px); }
+  }
+}
+
+@media (max-width: 1080px) {
+  .dashboard-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'chart'
+      'stats'
+      'alerts'
+      'engine';
+  }
+}
