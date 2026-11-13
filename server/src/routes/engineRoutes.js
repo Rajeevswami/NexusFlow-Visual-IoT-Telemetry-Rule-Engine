@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { activeGraphManager } from '../services/activeGraphManager.js';
 import { ruleExecutor } from '../services/ruleExecutor.js';
 import { telemetryBus } from '../services/telemetryBus.js';
+import { outboundQueue } from '../services/deliveryService.js';
+import { demoStatus } from '../services/demoService.js';
 
 /** Mounted at /api/engine */
 const router = Router();
@@ -23,6 +25,8 @@ router.get('/status', (req, res) => {
       routedReadings: routing.routedReadings,
       routingErrors: routing.errors,
       uptimeSeconds: Math.round(process.uptime()),
+      outbound: outboundQueue.stats(),
+      demo: demoStatus(),
     },
   });
 });

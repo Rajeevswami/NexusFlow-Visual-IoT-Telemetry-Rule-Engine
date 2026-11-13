@@ -5,6 +5,7 @@ import EngineStatus from '../components/dashboard/EngineStatus.jsx';
 import LiveLineChart from '../components/dashboard/LiveLineChart.jsx';
 import StatCards from '../components/dashboard/StatCards.jsx';
 import NavLinks from '../components/layout/NavLinks.jsx';
+import ThemeToggle from '../components/ThemeToggle.jsx';
 import { useTelemetrySeries } from '../hooks/useTelemetrySeries.js';
 import { errorMessage, graphApi, telemetryApi } from '../services/api.js';
 import { useWebSocket } from '../ws/WebSocketProvider.jsx';
@@ -129,6 +130,7 @@ export default function DashboardPage() {
           <div className="brand-copy"><strong>NexusFlow<span>.</span></strong><small>LIVE DASHBOARD</small></div>
         </div>
         <NavLinks />
+        <ThemeToggle />
         <div className="dashboard-topbar-meta">
           <span className={`health ${ws?.status === 'connected' ? 'online' : ws?.status === 'disconnected' ? 'offline' : 'checking'}`} role="status">
             <span className="health-dot" />

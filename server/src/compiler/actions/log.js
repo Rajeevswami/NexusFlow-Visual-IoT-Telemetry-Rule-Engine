@@ -1,3 +1,4 @@
+import logger from '../../config/logger.js';
 import { registerNode } from '../nodeRegistry.js';
 import { recordAlert } from '../../services/alertService.js';
 import { cooldownErrors, renderTemplate } from './template.js';
@@ -25,7 +26,7 @@ export function createLogAction(config, context) {
 
     // Dry runs collect results in memory; keep the test output quiet.
     if (!context.dryRun) {
-      console.info(`[${prefix}] ${message}`);
+      logger.info({ action: prefix, message }, 'Pipeline log action');
       await recordAlert({
         graphId: context.graphId,
         nodeId: context.nodeId,

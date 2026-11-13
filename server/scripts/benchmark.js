@@ -38,7 +38,7 @@ async function worker() {
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(process.env.INGEST_API_KEY ? { 'x-api-key': process.env.INGEST_API_KEY } : {}) },
         body: payload,
         signal: AbortSignal.timeout(30_000),
       });

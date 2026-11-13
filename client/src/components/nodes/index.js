@@ -12,6 +12,7 @@ import SensorNode from './SensorNode.jsx';
 import SmsAlertNode from './SmsAlertNode.jsx';
 import ThresholdNode from './ThresholdNode.jsx';
 import WebhookNode from './WebhookNode.jsx';
+import EmailNode from './EmailNode.jsx';
 
 export const nodeTypes = {
   // "nexus" is the Day 1 generic node, kept so graphs saved before Day 2 still render.
@@ -22,6 +23,7 @@ export const nodeTypes = {
   scale: ScaleNode,
   smsAlert: SmsAlertNode,
   webhook: WebhookNode,
+  email: EmailNode,
   log: LogNode,
 };
 

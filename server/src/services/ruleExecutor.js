@@ -1,3 +1,4 @@
+import logger from '../config/logger.js';
 import { Subject, catchError } from 'rxjs';
 import { telemetryBus } from './telemetryBus.js';
 
@@ -37,7 +38,7 @@ class RuleExecutor {
         this.route(reading);
       } catch (error) {
         this.#errors += 1;
-        console.error(`[ruleExecutor] failed to route a reading: ${error.message}`);
+        logger.error({ err: error }, `[ruleExecutor] failed to route a reading`);
       }
     });
   }
@@ -65,7 +66,7 @@ class RuleExecutor {
     const subscription = subject.pipe(
       catchError((error, caught) => {
         this.#errors += 1;
-        console.error(`[ruleExecutor] graph ${graphId} failed, resubscribing: ${error.message}`);
+        logger.error({ err: error }, `[ruleExecutor] graph ${graphId} failed, resubscribing`);
         return caught;
       }),
     ).subscribe({
@@ -75,12 +76,12 @@ class RuleExecutor {
           this.#routed += 1;
         } catch (error) {
           this.#errors += 1;
-          console.error(`[ruleExecutor] graph ${graphId} publish failed: ${error.message}`);
+          logger.error({ err: error }, `[ruleExecutor] graph ${graphId} publish failed`);
         }
       },
       error: (error) => {
         this.#errors += 1;
-        console.error(`[ruleExecutor] graph ${graphId} subscription error: ${error.message}`);
+        logger.error({ err: error }, `[ruleExecutor] graph ${graphId} subscription error`);
       },
     });
 

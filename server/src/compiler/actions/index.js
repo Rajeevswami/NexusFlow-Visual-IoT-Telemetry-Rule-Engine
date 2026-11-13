@@ -4,4 +4,5 @@
 export { createSmsAction } from './smsAlert.js';
 export { createWebhookAction } from './webhook.js';
 export { createLogAction } from './log.js';
+export { createEmailAction } from './email.js';
 export { renderTemplate } from './template.js';

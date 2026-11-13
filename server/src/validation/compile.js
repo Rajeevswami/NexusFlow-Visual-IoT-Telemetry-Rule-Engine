@@ -8,6 +8,7 @@ export const rawGraphSchema = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   nodes: z.array(z.record(z.unknown())).max(500),
   edges: z.array(z.record(z.unknown())).max(2000),
+  templateKey: z.string().trim().max(80).optional(),
   viewport: z.object({ x: z.number().finite(), y: z.number().finite(), zoom: z.number().finite().positive() }).optional(),
 }).strict();
 

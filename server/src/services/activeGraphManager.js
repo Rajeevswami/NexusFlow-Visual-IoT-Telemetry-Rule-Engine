@@ -1,8 +1,9 @@
+import logger from '../config/logger.js';
 import { Graph } from '../models/Graph.js';
 import { compileGraph } from '../compiler/index.js';
 import { httpError } from '../utils/httpError.js';
 import { env } from '../config/env.js';
-import { broadcastAlert, broadcastGraphStatus, broadcastNodeActivity } from './websocket.js';
+import { broadcastAlert, broadcastEdgeActivity, broadcastGraphStatus, broadcastNodeActivity } from './websocket.js';
 import { ruleExecutor } from './ruleExecutor.js';
 import { telemetryBus } from './telemetryBus.js';
 
@@ -40,6 +41,7 @@ class ActiveGraphManager {
         // runs unless NODE_ACTIVITY_ENABLED=true.
         trackActivity: env.nodeActivityEnabled,
         onActivity: (activity) => broadcastNodeActivity(activity),
+        onEdgeActivity: (activity) => broadcastEdgeActivity(activity),
       },
     );
 
@@ -73,11 +75,11 @@ class ActiveGraphManager {
     try {
       entry.compiled.dispose();
     } catch (error) {
-      console.error(`Failed to dispose pipeline ${graphId}: ${error.message}`);
+      logger.error({ err: error }, `Failed to dispose pipeline ${graphId}`);
     }
     this.#pipelines.delete(graphId);
     // Stop routing live telemetry to this graph and tell subscribers it is gone.
-    try { ruleExecutor.unregister(graphId); } catch (error) { console.error(`Failed to unregister ${graphId}: ${error.message}`); }
+    try { ruleExecutor.unregister(graphId); } catch (error) { logger.error({ err: error }, `Failed to unregister ${graphId}`); }
     broadcastGraphStatus(graphId, 'inactive');
     return true;
   }
@@ -108,7 +110,7 @@ class ActiveGraphManager {
         try {
           delivered += entry.compiled.publish(reading);
         } catch (error) {
-          console.error(`Pipeline ${entry.graphId} failed to process a reading: ${error.message}`);
+          logger.error({ err: error }, `Pipeline ${entry.graphId} failed to process a reading`);
         }
       }
     }

@@ -34,7 +34,7 @@ if (!Number.isInteger(rounds) || rounds < 10 || rounds > 1000) { console.error('
 if (!Number.isInteger(spikeEvery) || spikeEvery < 2) { console.error('--spike-every must be >= 2.'); process.exit(1); }
 if (!['http', 'ws'].includes(transport)) { console.error('--transport must be http or ws.'); process.exit(1); }
 
-const api = (path, init) => fetch(new URL(path, baseUrl), { headers: { 'Content-Type': 'application/json' }, ...init });
+const api = (path, init = {}) => fetch(new URL(path, baseUrl), { ...init, headers: { 'Content-Type': 'application/json', ...(process.env.INGEST_API_KEY ? { 'x-api-key': process.env.INGEST_API_KEY } : {}), ...init.headers } });
 const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function json(response) {
@@ -97,7 +97,7 @@ if (transport === 'http') {
   sent = response.accepted;
 } else {
   const wsUrl = new URL('/ws', `${baseUrl.protocol === 'https:' ? 'wss:' : 'ws:'}//${baseUrl.host}`);
-  const socket = new WebSocket(wsUrl);
+  const socket = new WebSocket(wsUrl, { headers: process.env.INGEST_API_KEY ? { 'x-api-key': process.env.INGEST_API_KEY } : {} });
   await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
   let acked = 0;
   socket.on('message', (raw) => {

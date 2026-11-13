@@ -1,6 +1,8 @@
 import { useCallback } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { NODE_TYPES } from './definitions.js';
+import HeadersEditor from './HeadersEditor.jsx';
+import TestNodeButton from './TestNodeButton.jsx';
 
 /**
  * Returns a setter that writes one key of `data.config` back into React Flow state.
@@ -30,6 +32,8 @@ export function ConfigField({ field, value, onChange }) {
         <select className={inputClass} value={value ?? ''} onChange={(event) => onChange(field.key, event.target.value)}>
           {field.options.map((option) => <option key={option} value={option}>{option}</option>)}
         </select>
+      ) : field.type === 'textarea' ? (
+        <textarea className={`${inputClass} node-textarea`} rows={4} value={value ?? ''} maxLength={field.maxLength ?? 2000} placeholder={field.placeholder} onChange={(event) => onChange(field.key, event.target.value)} />
       ) : field.type === 'number' ? (
         <input
           className={inputClass}
@@ -46,10 +50,10 @@ export function ConfigField({ field, value, onChange }) {
       ) : (
         <input
           className={inputClass}
-          type="text"
+          type={field.type === 'url' || field.type === 'email' ? field.type : 'text'}
           value={value ?? ''}
           placeholder={field.placeholder}
-          maxLength={field.key === 'messageTemplate' || field.key === 'template' ? 240 : 120}
+          maxLength={field.maxLength ?? (field.key === 'messageTemplate' || field.key === 'template' ? 2000 : 120)}
           onChange={(event) => onChange(field.key, event.target.value)}
         />
       )}
@@ -64,9 +68,13 @@ export function ConfigFields({ id, type, data }) {
   if (!definition) return null;
   return (
     <div className="node-fields">
-      {definition.fields.map((field) => (
+      {definition.fields.map((field) => field.type === 'headers' ? (
+        <HeadersEditor key={field.key} value={data?.config?.headers ?? {}} onChange={(value) => setConfig('headers', value)} />
+      ) : (
         <ConfigField key={field.key} field={field} value={data?.config?.[field.key]} onChange={setConfig} />
       ))}
+      {type === 'webhook' && <small className="template-hint">Placeholders: {'{{deviceId}}'}, {'{{value}}'}, {'{{timestamp}}'}, {'{{message}}'}. Quoted values are JSON-escaped.</small>}
+      {['webhook', 'smsAlert', 'email'].includes(type) && <TestNodeButton id={id} type={type} config={data?.config ?? {}} />}
     </div>
   );
 }

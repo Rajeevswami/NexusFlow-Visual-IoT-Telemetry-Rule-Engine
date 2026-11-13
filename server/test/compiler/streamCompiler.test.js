@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { compileGraph, GraphValidationError } from '../../src/compiler/streamCompiler.js';
 import { nodeRegistry } from '../../src/compiler/nodeRegistry.js';
+import logger from '../../src/config/logger.js';
 
 const sourceNode = (id = 'sensor-1', config = { deviceId: 'turbine-001', sensorType: 'temperature' }) => ({ id, type: 'sensor', position: { x: 0, y: 0 }, data: { config } });
 const averageNode = (id = 'average-1', windowSize = 3) => ({ id, type: 'movingAverage', position: { x: 0, y: 0 }, data: { config: { windowSize } } });
@@ -17,7 +18,7 @@ const linearGraph = {
 
 describe('streamCompiler', () => {
   it('registers the built-in node types', () => {
-    expect(nodeRegistry.types().sort()).toEqual(['log', 'movingAverage', 'scale', 'sensor', 'smsAlert', 'threshold', 'webhook']);
+    expect(nodeRegistry.types().sort()).toEqual(['email', 'log', 'movingAverage', 'scale', 'sensor', 'smsAlert', 'threshold', 'webhook']);
   });
 
   it('fires the log action when the moving average crosses the threshold', async () => {
@@ -51,7 +52,7 @@ describe('streamCompiler', () => {
 
     const [alert] = compiled.getAlerts();
     expect(alert.message).toBe('ALERT turbine-001 = 60°C');
-    expect(alert.to).toBe('+911234567890');
+    expect(alert.to).toBe('+******7890'); // public result must mask the phone
     compiled.dispose();
   });
 
@@ -130,13 +131,13 @@ describe('streamCompiler', () => {
       edges: [link('sensor-1', 'log-1')],
     }, { dryRun: true, onAlert: () => { throw new Error('listener exploded'); } });
 
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logError = vi.spyOn(logger, 'error').mockImplementation(() => {});
     compiled.pushValues([1, 2]);
     await new Promise((resolve) => setImmediate(resolve));
     // Both events were still delivered to the action.
     expect(compiled.getAlerts()).toHaveLength(2);
-    expect(consoleError).toHaveBeenCalled();
-    consoleError.mockRestore();
+    expect(logError).toHaveBeenCalled();
+    logError.mockRestore();
     compiled.dispose();
   });
 });
