@@ -14,6 +14,10 @@ const alertSchema = new mongoose.Schema({
   value: { type: Number },
   message: { type: String, required: true },
   triggeredAt: { type: Date, default: Date.now },
+  // Additive Day-4 audit links. Older alerts remain valid and display "not tracked".
+  deliveryIds: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'DeliveryLog' }], default: [] },
+  deliveryStatus: { type: String, enum: ['pending', 'success', 'failed'], default: undefined },
 }, { timestamps: false, versionKey: false });
+alertSchema.index({ triggeredAt: -1 });
 
 export const Alert = mongoose.model('Alert', alertSchema);

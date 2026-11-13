@@ -10,6 +10,9 @@ export const graphApi = {
   create: (graph) => api.post('/graphs', graph),
   list: () => api.get('/graphs'),
   get: (id) => api.get(`/graphs/${encodeURIComponent(id)}`),
+  update: (id, graph) => api.put(`/graphs/${encodeURIComponent(id)}`, graph),
+  templates: () => api.get('/templates'),
+  testNode: (payload) => api.post('/nodes/test', payload, { timeout: 25_000 }),
   /** Validate raw graph JSON server-side without saving it. */
   validate: (graph) => api.post('/graphs/validate', graph),
   /** Compile + activate a saved graph (returns the pipeline summary). */
@@ -30,6 +33,17 @@ export const telemetryApi = {
   readings: (params = {}) => api.get('/telemetry', { params }),
 };
 
+export const deliveryApi = {
+  list: (params = {}) => api.get('/deliveries', { params }),
+  retry: (id) => api.post(`/deliveries/${encodeURIComponent(id)}/retry`),
+  receiver: () => api.get('/mock/webhook-receiver'),
+};
+export const demoApi = {
+  start: () => api.post('/demo/start', { durationSeconds: 120 }, { timeout: 20_000 }),
+  stop: () => api.post('/demo/stop'),
+  status: () => api.get('/demo/status'),
+};
+
 export const engineApi = {
   /** { activeGraphs, messagesProcessed, messagesPerSecond, alertsFired } */
   status: () => api.get('/engine/status'),
@@ -37,7 +51,9 @@ export const engineApi = {
 
 export function errorMessage(error) {
   return error.response?.data?.error?.message
-    || (error.code === 'ECONNABORTED' ? 'The request timed out.' : 'Cannot reach the backend. Check that the server and MongoDB are running.');
+    || (error.code === 'ECONNABORTED' ? 'The request timed out.' : null)
+    || error.message
+    || 'Cannot reach the backend. Check that the server and MongoDB are running.';
 }
 
 /** Backend validation issues, when the API returned a 400 with details. */

@@ -9,6 +9,7 @@ export default function NavLinks({ className = '' }) {
     <nav className={`route-nav ${className}`} aria-label="Primary">
       <NavLink to="/" end>Editor</NavLink>
       <NavLink to="/dashboard">Dashboard</NavLink>
+      <NavLink to="/alerts">Alerts</NavLink>
     </nav>
   );
 }

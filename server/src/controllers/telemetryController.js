@@ -1,3 +1,4 @@
+import logger from '../config/logger.js';
 import { Telemetry } from '../models/Telemetry.js';
 import { telemetryBus } from '../services/telemetryBus.js';
 
@@ -16,7 +17,7 @@ async function insertAndAccept(readings, res) {
   res.status(202).json({ accepted: inserted.length });
   setImmediate(() => {
     try { telemetryBus.ingest(inserted); }
-    catch (error) { console.error('Telemetry fan-out failed:', error.message); }
+    catch (error) { logger.error({ err: error }, 'Telemetry fan-out failed:'); }
   });
 }
 

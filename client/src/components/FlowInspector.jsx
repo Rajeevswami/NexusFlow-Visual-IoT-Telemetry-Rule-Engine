@@ -52,7 +52,7 @@ export default function FlowInspector({ nodes, edges, selectedNode, onRemoveNode
           <div className="telemetry-empty"><span className="telemetry-empty-icon"><Radio size={17} /></span><strong>Listening for data</strong><p>Run the simulator to see readings arrive here in real time.</p><code>npm run simulate</code></div>
         )}
       </section>
-      <div className="inspector-note"><span className="note-star">✳</span><div><strong>Just the beginning.</strong><p>Graphs are saved today. Live rule execution is coming in a future milestone.</p></div></div>
+      <div className="inspector-note"><span className="note-star">✳</span><div><strong>Your rules are live.</strong><p>Activate a saved graph to evaluate telemetry. Run Demo to watch the alert path glow and track deliveries.</p></div></div>
     </aside>
   );
 }

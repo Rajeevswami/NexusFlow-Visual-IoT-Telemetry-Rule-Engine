@@ -47,7 +47,7 @@ let reconnectDelay = 500;
 
 function connectWs() {
   if (!useWs || !running) return;
-  socket = new WebSocket(wsEndpoint);
+  socket = new WebSocket(wsEndpoint, { headers: process.env.INGEST_API_KEY ? { 'x-api-key': process.env.INGEST_API_KEY } : {} });
   socket.on('open', () => {
     socketReady = true;
     reconnectDelay = 500;
@@ -109,7 +109,7 @@ while (running) {
       for (let i = 0; i < readings.length; i += 1000) {
         const response = await fetch(endpoint, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(process.env.INGEST_API_KEY ? { 'x-api-key': process.env.INGEST_API_KEY } : {}) },
           body: JSON.stringify(readings.slice(i, i + 1000)),
           signal: AbortSignal.timeout(15_000),
         });

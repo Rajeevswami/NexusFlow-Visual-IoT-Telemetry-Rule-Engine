@@ -2,6 +2,9 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { Telemetry } from '../models/Telemetry.js';
 import { readingSchema } from '../validation/telemetry.js';
 import { telemetryBus } from './telemetryBus.js';
+import { env } from '../config/env.js';
+import { logger } from '../config/logger.js';
+import { secretEquals } from '../utils/sanitize.js';
 
 /**
  * WebSocket layer: ingestion + channel-based fan-out on `/ws`.
@@ -17,6 +20,8 @@ import { telemetryBus } from './telemetryBus.js';
  *   { type: "telemetry",     data }   // channel `telemetry:<deviceId>` (or `telemetry` for all)
  *   { type: "alert",         data }   // channels `alerts` and `graph:<graphId>`
  *   { type: "node_activity", data }   // channel  `graph:<graphId>`
+ *   { type: "edge_activity", data }   // channel  `graph:<graphId>`, ≤10 Hz/edge
+ *   { type: "delivery",      data }   // channels `alerts` and `graph:<graphId>`
  *   { type: "graph_status",  data }   // channel  `graph:<graphId>`
  *
  * Delivery is never a blanket broadcast: the server keeps `channel -> Set<socket>` and
@@ -41,6 +46,9 @@ const deviceFlushers = new Map();
 const activitySentAt = new Map();
 /** @type {Map<string, NodeJS.Timeout>} pending trailing activity flushes */
 const activityTimers = new Map();
+const edgeSentAt = new Map();
+const edgeTimers = new Map();
+const EDGE_ACTIVITY_WINDOW_MS = 100; // ≤10 events/second/edge, latest value wins
 
 const CHANNEL_PATTERN = /^(alerts|telemetry|telemetry:[\w.:-]{1,120}|graph:[\w-]{1,120})$/;
 const ACTIVITY_WINDOW_MS = 300;
@@ -52,7 +60,7 @@ const SAMPLE_MS = 100;
 function sendTo(socket, payload) {
   if (socket.readyState !== WebSocket.OPEN || socket.bufferedAmount > maxBufferedBytes) return false;
   socket.send(payload, (error) => {
-    if (error) console.error('WebSocket send failed:', error.message);
+    if (error) logger.error({ err: error }, 'WebSocket send failed:');
   });
   return true;
 }
@@ -74,7 +82,7 @@ function publishToChannels(channelNames, type, data) {
   if (targets.size === 0) return 0;
   let payload;
   try { payload = JSON.stringify({ type, data }); } catch (error) {
-    console.error(`WebSocket serialisation failed for ${type}: ${error.message}`);
+    logger.error({ err: error }, `WebSocket serialisation failed for ${type}`);
     return 0;
   }
   let delivered = 0;
@@ -160,6 +168,9 @@ export function broadcastAlert(alert) {
     message: alert.message,
     severity: severityOf(alert),
     triggeredAt: alert.triggeredAt ?? new Date(),
+    alertId: alert.alertId ?? null,
+    deliveryIds: alert.deliveryIds ?? [],
+    deliveryStatus: alert.deliveryStatus ?? null,
   };
   const targets = ['alerts'];
   if (data.graphId) targets.push(`graph:${data.graphId}`);
@@ -176,7 +187,8 @@ export function broadcastNodeActivity(activity) {
   if (!graphId || channels.size === 0) return;
   const nodeId = activity.nodeId ?? 'unknown';
   const key = `${graphId}:${nodeId}`;
-  const data = { graphId, nodeId, value: activity.value, timestamp: activity.timestamp ?? new Date() };
+  const data = { graphId, nodeId, value: activity.value, timestamp: activity.timestamp ?? new Date(),
+    tone: activity.tone ?? 'data', label: activity.label ?? 'value', unit: activity.unit ?? '' };
   const now = Date.now();
   const last = activitySentAt.get(key) ?? 0;
   if (now - last >= ACTIVITY_WINDOW_MS) {
@@ -193,6 +205,42 @@ export function broadcastNodeActivity(activity) {
   }, ACTIVITY_WINDOW_MS - (now - last));
   timer.unref?.();
   activityTimers.set(key, timer);
+}
+
+/** Independent leading/trailing edge throttle; node protocol stays backward compatible. */
+export function broadcastEdgeActivity(activity) {
+  const { graphId, edgeId } = activity ?? {};
+  if (!graphId || !edgeId || !channels.has(`graph:${graphId}`)) return;
+  const key = `${graphId}:${edgeId}`;
+  const data = { graphId, edgeId, timestamp: activity.timestamp ?? new Date(), tone: activity.tone ?? 'data' };
+  const now = Date.now();
+  const last = edgeSentAt.get(key) ?? 0;
+  if (now - last >= EDGE_ACTIVITY_WINDOW_MS) {
+    edgeSentAt.set(key, now);
+    publishToChannel(`graph:${graphId}`, 'edge_activity', data);
+    return;
+  }
+  if (edgeTimers.has(key)) { edgeTimers.get(key).data = data; return; }
+  const entry = { data, timer: null };
+  entry.timer = setTimeout(() => {
+    edgeTimers.delete(key);
+    edgeSentAt.set(key, Date.now());
+    publishToChannel(`graph:${graphId}`, 'edge_activity', entry.data);
+  }, EDGE_ACTIVITY_WINDOW_MS - (now - last));
+  entry.timer.unref?.();
+  edgeTimers.set(key, entry);
+  // Maps are bounded even for long-lived servers with many short-lived graphs.
+  if (edgeSentAt.size > 8192) {
+    for (const [id, time] of edgeSentAt) if (now - time > 60_000 && !edgeTimers.has(id)) edgeSentAt.delete(id);
+    if (edgeSentAt.size > 8192) edgeSentAt.delete(edgeSentAt.keys().next().value);
+  }
+}
+
+/** Final provider result; target is already masked by deliveryDto. */
+export function broadcastDelivery(delivery) {
+  const targets = ['alerts'];
+  if (delivery.graphId) targets.push(`graph:${delivery.graphId}`);
+  publishToChannels(targets, 'delivery', delivery);
 }
 
 /** Announce activation / deactivation / error of a pipeline to `graph:<id>` subscribers. */
@@ -245,6 +293,10 @@ function handleUnsubscribe(socket, raw) {
  * run after the response is flushed.
  */
 function handleTelemetry(socket, data) {
+  if (!socket.canIngest) return sendJson(socket, 'error', { code: 'UNAUTHORIZED', message: 'WS ingestion requires the x-api-key handshake header.' });
+  const now = Date.now();
+  if (now - socket.ingestWindowStart >= 60_000) { socket.ingestWindowStart = now; socket.ingestCount = 0; }
+  if (++socket.ingestCount > env.ingestRateLimit) return sendJson(socket, 'error', { code: 'RATE_LIMITED', message: 'WebSocket ingestion rate limit exceeded.' });
   const parsed = readingSchema.safeParse(data);
   if (!parsed.success) {
     return sendJson(socket, 'error', {
@@ -258,12 +310,12 @@ function handleTelemetry(socket, data) {
     try {
       await Telemetry.insertMany([reading], { ordered: false, lean: true });
     } catch (error) {
-      console.error(`WebSocket telemetry persist failed: ${error.message}`);
+      logger.error({ err: error }, `WebSocket telemetry persist failed`);
     }
     try {
       telemetryBus.ingest([reading]);
     } catch (error) {
-      console.error(`WebSocket telemetry fan-out failed: ${error.message}`);
+      logger.error({ err: error }, `WebSocket telemetry fan-out failed`);
     }
   });
   return undefined;
@@ -289,7 +341,7 @@ function handleMessage(socket, raw) {
       default: return sendJson(socket, 'error', { message: `Unknown message type "${message.type}".` });
     }
   } catch (error) {
-    console.error(`WebSocket message handling failed: ${error.message}`);
+    logger.error({ err: error }, `WebSocket message handling failed`);
     return sendJson(socket, 'error', { message: 'Message could not be processed.' });
   }
 }
@@ -315,16 +367,20 @@ function detachSocket(socket) {
 export function attachWebSocketServer(httpServer) {
   socketServer = new WebSocketServer({ server: httpServer, path: '/ws', maxPayload: 64 * 1024 });
 
-  socketServer.on('connection', (socket) => {
+  socketServer.on('connection', (socket, request) => {
     socket.isAlive = true;
     socket.channels = new Set();
+    // Read-only dashboard subscriptions stay public; ingestion needs the optional key.
+    socket.canIngest = !env.ingestApiKey || secretEquals(request.headers['x-api-key'], env.ingestApiKey);
+    socket.ingestWindowStart = Date.now();
+    socket.ingestCount = 0;
     socket.on('pong', () => { socket.isAlive = true; });
-    socket.on('error', (error) => console.error('WebSocket error:', error.message));
+    socket.on('error', (error) => logger.error({ err: error }, 'WebSocket error:'));
     socket.on('message', (raw) => handleMessage(socket, raw));
     socket.on('close', () => detachSocket(socket));
     sendJson(socket, 'connected', { message: 'Connected to NexusFlow', channels: ['telemetry', 'telemetry:<deviceId>', 'alerts', 'graph:<graphId>'] });
   });
-  socketServer.on('error', (error) => console.error('WebSocket server error:', error.message));
+  socketServer.on('error', (error) => logger.error({ err: error }, 'WebSocket server error:'));
 
   // Every bus reading fans out to subscribed channels only.
   busSubscription = telemetryBus.subscribe((reading) => broadcastTelemetry(reading));
@@ -347,6 +403,9 @@ export function attachWebSocketServer(httpServer) {
     for (const timer of activityTimers.values()) clearTimeout(timer);
     activityTimers.clear();
     activitySentAt.clear();
+    for (const entry of edgeTimers.values()) clearTimeout(entry.timer);
+    edgeTimers.clear();
+    edgeSentAt.clear();
     channels.clear();
     socketServer = null;
   });

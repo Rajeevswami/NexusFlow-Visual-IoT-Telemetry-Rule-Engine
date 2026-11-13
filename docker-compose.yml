@@ -1,0 +1,35 @@
+services:
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  server:
+    build: ./server
+    environment:
+      NODE_ENV: development
+      MONGODB_URI: mongodb://mongo:27017/nexusflow
+      CLIENT_ORIGIN: http://localhost:8080
+      # Demo only: permits calls to the local mock receiver, and also other private targets.
+      ALLOW_PRIVATE_WEBHOOKS: "true"
+      DEMO_WEBHOOK_URL: http://127.0.0.1:5000/api/mock/webhook-receiver
+      MOCK_RECEIVER_ENABLED: "true"
+      DEMO_ENABLED: "true"
+      SMS_PROVIDER: mock
+    depends_on:
+      mongo:
+        condition: service_healthy
+    expose:
+      - "5000"
+  client:
+    build: ./client
+    depends_on:
+      - server
+    ports:
+      - "8080:80"
+volumes:
+  mongo-data:

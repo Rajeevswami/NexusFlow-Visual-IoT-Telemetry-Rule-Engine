@@ -1,4 +1,4 @@
-import { Activity, BellRing, ChartNoAxesCombined, Radio, Scale, ScrollText, Webhook } from 'lucide-react';
+import { Activity, BellRing, ChartNoAxesCombined, Mail, Radio, Scale, ScrollText, Webhook } from 'lucide-react';
 
 /**
  * Single source of truth for every node type the editor can place on the canvas.
@@ -97,15 +97,28 @@ export const NODE_TYPES = {
     type: 'webhook',
     category: 'action',
     label: 'Webhook',
-    description: 'POSTs the reading to an HTTP endpoint',
+    description: 'Calls an HTTP endpoint with retries and delivery tracking',
     tag: 'HTTP REQUEST',
     icon: Webhook,
     hasInput: true,
     hasOutput: false,
-    defaultConfig: { url: 'https://example.com/hook', method: 'POST', cooldownSeconds: 0 },
+    defaultConfig: { url: 'https://example.com/hook', method: 'POST', headers: {}, bodyTemplate: '{"deviceId":"{{deviceId}}","value":{{value}},"timestamp":"{{timestamp}}","message":"{{message}}"}', cooldownSeconds: 30 },
     fields: [
-      { key: 'url', label: 'URL', type: 'text', placeholder: 'https://example.com/hook' },
-      { key: 'method', label: 'Method', type: 'select', options: ['POST', 'PUT', 'PATCH'] },
+      { key: 'url', label: 'URL', type: 'url', placeholder: 'https://example.com/hook', maxLength: 2048 },
+      { key: 'method', label: 'Method', type: 'select', options: ['POST', 'GET', 'PUT', 'PATCH'] },
+      { key: 'headers', label: 'Headers', type: 'headers' },
+      { key: 'bodyTemplate', label: 'JSON body template', type: 'textarea', maxLength: 16384, placeholder: '{"value":{{value}}}' },
+      { key: 'cooldownSeconds', label: 'Cooldown (s)', type: 'number', min: 0, max: 86400, step: 1 },
+    ],
+  },
+  email: {
+    type: 'email', category: 'action', label: 'Email', description: 'Mock email or SMTP with a delivery audit', tag: 'NOTIFICATION', icon: Mail,
+    hasInput: true, hasOutput: false,
+    defaultConfig: { to: 'operator@example.com', subject: 'NexusFlow alert: ${deviceId}', messageTemplate: 'ALERT {{deviceId}} {{sensorType}} = {{value}}{{unit}}', cooldownSeconds: 30 },
+    fields: [
+      { key: 'to', label: 'Recipient', type: 'email', placeholder: 'operator@example.com', maxLength: 254 },
+      { key: 'subject', label: 'Subject', type: 'text', maxLength: 200 },
+      { key: 'messageTemplate', label: 'Message', type: 'textarea', maxLength: 2000 },
       { key: 'cooldownSeconds', label: 'Cooldown (s)', type: 'number', min: 0, max: 86400, step: 1 },
     ],
   },
@@ -156,6 +169,7 @@ export const PALETTE_GROUPS = [
     items: [
       { type: 'smsAlert', label: 'SMS Alert', description: 'Notify an operator', config: { phone: '+911234567890' } },
       { type: 'webhook', label: 'Webhook', description: 'Call an HTTP endpoint', config: { url: 'https://example.com/hook', method: 'POST' } },
+      { type: 'email', label: 'Email', description: 'Notify by mock email or SMTP', config: { to: 'operator@example.com' } },
       { type: 'log', label: 'Log', description: 'Debug the pipeline', config: { label: 'pipeline' } },
     ],
   },

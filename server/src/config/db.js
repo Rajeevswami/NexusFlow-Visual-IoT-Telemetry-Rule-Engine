@@ -1,3 +1,4 @@
+import logger from './logger.js';
 import mongoose from 'mongoose';
 import { env } from './env.js';
 
@@ -17,7 +18,7 @@ export async function ensureTelemetryCollection(db, retentionSeconds) {
     if (retentionSeconds !== undefined) options.expireAfterSeconds = retentionSeconds;
     try {
       await db.createCollection(collectionName, options);
-      console.info('Created telemetry time-series collection.');
+      logger.info('Created telemetry time-series collection.');
     } catch (error) {
       // Another app instance may have created the collection between our check and create.
       if (error.code !== 48 && error.codeName !== 'NamespaceExists') throw error;
@@ -33,7 +34,7 @@ export async function ensureTelemetryCollection(db, retentionSeconds) {
   // Retention is deliberately creation-only; silently changing it could delete existing data.
   const existingRetention = existing.options.expireAfterSeconds;
   if (retentionSeconds !== undefined && Number(existingRetention) !== retentionSeconds) {
-    console.warn('TELEMETRY_RETENTION_SECONDS differs from the existing collection. The existing retention setting was not changed.');
+    logger.warn('TELEMETRY_RETENTION_SECONDS differs from the existing collection. The existing retention setting was not changed.');
   }
 
   await db.collection(collectionName).createIndex(
@@ -47,5 +48,5 @@ export async function connectDatabase() {
   mongoose.set('bufferCommands', false);
   await mongoose.connect(env.mongoUri, { serverSelectionTimeoutMS: 5000 });
   await ensureTelemetryCollection(mongoose.connection.db, env.telemetryRetentionSeconds);
-  console.info(`MongoDB connected: ${mongoose.connection.name}`);
+  logger.info(`MongoDB connected: ${mongoose.connection.name}`);
 }

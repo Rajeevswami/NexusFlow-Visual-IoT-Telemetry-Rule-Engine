@@ -19,7 +19,9 @@ export function renderTemplate(template, event = {}) {
     timestamp: when.toISOString(),
     date: when.toISOString().slice(0, 10),
   };
-  return template.replace(/\$\{\s*(\w+)\s*\}/g, (match, key) => (key in values ? String(values[key]) : match));
+  const substitute = (match, key) => (Object.hasOwn(values, key) ? String(values[key]) : match);
+  // Day-2 ${value} syntax remains valid; Day-4 also accepts {{value}} in messages.
+  return template.replace(/\$\{\s*(\w+)\s*\}/g, substitute).replace(/\{\{\s*(\w+)\s*\}\}/g, substitute);
 }
 
 /**

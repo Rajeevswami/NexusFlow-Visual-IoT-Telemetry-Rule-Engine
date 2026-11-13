@@ -28,8 +28,8 @@ function channelsFor(message) {
     const deviceId = data?.metadata?.deviceId;
     return deviceId ? [`telemetry:${deviceId}`, 'telemetry'] : ['telemetry'];
   }
-  if (type === 'alert') return data?.graphId ? ['alerts', `graph:${data.graphId}`] : ['alerts'];
-  if (type === 'node_activity' || type === 'graph_status') {
+  if (type === 'alert' || type === 'delivery') return data?.graphId ? ['alerts', `graph:${data.graphId}`] : ['alerts'];
+  if (type === 'node_activity' || type === 'edge_activity' || type === 'graph_status') {
     return data?.graphId ? [`graph:${data.graphId}`] : [];
   }
   return []; // connected / subscribed / ack / pong / error — handled by the provider itself

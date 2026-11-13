@@ -3,8 +3,11 @@ import { MousePointer2, Sparkles } from 'lucide-react';
 import { useCallback } from 'react';
 import { nodeTypes } from '../nodes/index.js';
 import { validateConnection } from './graphRules.js';
+import AnimatedEdge from './AnimatedEdge.jsx';
+import { useTheme } from '../ThemeProvider.jsx';
 
-const edgeOptions = { type: 'smoothstep', style: { stroke: '#94aaa9', strokeWidth: 2 } };
+const edgeTypes = { glowEdge: AnimatedEdge };
+const edgeOptions = { type: 'glowEdge', style: { strokeWidth: 2 } };
 
 /**
  * Central canvas.
@@ -13,6 +16,7 @@ const edgeOptions = { type: 'smoothstep', style: { stroke: '#94aaa9', strokeWidt
  * and `isValidConnection` refuses illegal links while the user is still dragging.
  */
 export default function FlowCanvas({ nodes, edges, onNodesChange, onEdgesChange, onConnect, onDrop, onInvalidConnection, canvasRef }) {
+  const { theme } = useTheme();
   // Pure: React Flow calls this repeatedly while dragging, so it must not have side effects.
   const isValidConnection = useCallback(
     (connection) => validateConnection(connection, nodes, edges).valid,
@@ -35,6 +39,8 @@ export default function FlowCanvas({ nodes, edges, onNodesChange, onEdgesChange,
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        colorMode={theme}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
@@ -49,7 +55,7 @@ export default function FlowCanvas({ nodes, edges, onNodesChange, onEdgesChange,
         deleteKeyCode={['Backspace', 'Delete']}
         proOptions={{ hideAttribution: false }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={22} size={1.3} color="#cbd8d7" />
+        <Background variant={BackgroundVariant.Dots} gap={22} size={1.3} color={theme === 'dark' ? '#35515b' : '#cbd8d7'} />
         <Controls position="bottom-left" showInteractive={false} />
         <MiniMap
           position="bottom-right"

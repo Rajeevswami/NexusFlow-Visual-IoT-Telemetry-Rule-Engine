@@ -1,56 +1,28 @@
 import { registerNode } from '../nodeRegistry.js';
-import { recordAlert } from '../../services/alertService.js';
+import { dispatchAction } from '../../services/deliveryService.js';
+import { buildActionRequest } from '../../integrations/actionRequests.js';
+import { maskPhone } from '../../utils/sanitize.js';
 import { cooldownErrors, renderTemplate } from './template.js';
 
 const DEFAULT_TEMPLATE = 'ALERT ${deviceId} ${sensorType} = ${value}${unit}';
 
-/**
- * Mock SMS gateway: logs the message and stores it in the `alerts` collection.
- * Swapping this for Twilio/MSG91 later only requires replacing this handler.
- */
+/** Provider selection, retries and delivery audits are owned by the integration layer. */
 export function createSmsAction(config, context) {
-  const phone = String(config.phone ?? '').trim() || '+10000000000';
-  const template = config.messageTemplate || DEFAULT_TEMPLATE;
-
   return async (event) => {
-    const message = renderTemplate(template, event);
-    const result = {
-      nodeId: context.nodeId,
-      type: 'smsAlert',
-      deviceId: event?.deviceId ?? 'unknown',
-      sensorType: event?.sensorType,
-      value: event?.value,
-      message,
-      to: phone,
-      triggeredAt: new Date(),
-      delivered: false,
-      dryRun: Boolean(context.dryRun),
+    const { target, request } = buildActionRequest('smsAlert', { ...config, messageTemplate: config.messageTemplate || DEFAULT_TEMPLATE }, event);
+    const alert = {
+      graphId: context.graphId, nodeId: context.nodeId, type: 'smsAlert',
+      deviceId: event?.deviceId ?? 'unknown', sensorType: event?.sensorType, value: event?.value,
+      message: request.body, triggeredAt: new Date(),
     };
-
-    // Dry runs never contact the provider and never touch the database.
+    const result = { ...alert, to: maskPhone(target), delivered: false, dryRun: Boolean(context.dryRun) };
     if (context.dryRun) return result;
-
-    console.info(`[sms -> ${phone}] ${message}`);
-    const saved = await recordAlert({
-      graphId: context.graphId,
-      nodeId: context.nodeId,
-      type: 'smsAlert',
-      deviceId: result.deviceId,
-      sensorType: result.sensorType,
-      value: result.value,
-      message,
-      triggeredAt: result.triggeredAt,
-    });
-    result.alertId = saved?._id?.toString();
-    result.delivered = Boolean(saved);
-    return result;
+    return dispatchAction(alert, 'sms', target, request);
   };
 }
 
 registerNode({
-  type: 'smsAlert',
-  category: 'action',
-  label: 'SMS Alert',
+  type: 'smsAlert', category: 'action', label: 'SMS Alert',
   defaults: { phone: '+10000000000', messageTemplate: DEFAULT_TEMPLATE, cooldownSeconds: 0 },
   validate(config) {
     const errors = [];
@@ -58,11 +30,8 @@ registerNode({
       const phone = String(config.phone).trim();
       if (phone === '' || !/^\+?[0-9 ()-]{6,20}$/.test(phone)) errors.push('phone must be 6-20 digits (optional leading +).');
     }
-    if (config.messageTemplate !== undefined && String(config.messageTemplate).length > 240) {
-      errors.push('messageTemplate must be 240 characters or fewer.');
-    }
-    errors.push(...cooldownErrors(config));
-    return errors;
+    if (config.messageTemplate !== undefined && (typeof config.messageTemplate !== 'string' || config.messageTemplate.length > 240)) errors.push('messageTemplate must be a string of 240 characters or fewer.');
+    return [...errors, ...cooldownErrors(config)];
   },
   createAction: createSmsAction,
 });

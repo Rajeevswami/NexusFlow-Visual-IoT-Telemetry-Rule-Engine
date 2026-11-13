@@ -1,5 +1,6 @@
 import { ChevronRight, Download, FolderOpen, LoaderCircle, Play, Save, Send, ShieldCheck, Square } from 'lucide-react';
 import NavLinks from './NavLinks.jsx';
+import ThemeToggle from '../ThemeToggle.jsx';
 
 /**
  * Top toolbar: health indicator, Editor | Dashboard nav, activation controls
@@ -22,6 +23,7 @@ export default function Navbar({
   onSendTestData,
   activating = false,
   testing = false,
+  allowRecompile = false,
 }) {
   const healthText = health === 'online' ? 'Backend connected' : health === 'offline' ? 'Backend offline' : 'Checking backend';
   const status = activation?.status ?? 'inactive';
@@ -35,6 +37,7 @@ export default function Navbar({
       </div>
       <div className="nav-breadcrumb"><span>Workspace</span><ChevronRight size={14} /><strong>Flow editor</strong></div>
       <NavLinks />
+      <ThemeToggle />
       <div className="nav-actions">
         <div className={`health ${health}`} role="status"><span className="health-dot" />{healthText}</div>
         <div className="nav-divider" />
@@ -44,7 +47,7 @@ export default function Navbar({
             <span className={`engine-badge engine-badge-${status}`} title={activation?.message ?? 'Pipeline status'}>
               <i />{statusLabel}
             </span>
-            <button className="button button-ghost" onClick={onActivate} disabled={activating || status === 'active'}>
+            <button className="button button-ghost" onClick={onActivate} disabled={activating || (status === 'active' && !allowRecompile)}>
               {activating ? <LoaderCircle className="spin" size={16} /> : <Play size={16} />}
               <span>{activating ? 'Activating…' : 'Activate'}</span>
             </button>

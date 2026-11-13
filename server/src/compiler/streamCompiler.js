@@ -1,3 +1,4 @@
+import logger from '../config/logger.js';
 import { EMPTY, Subject, catchError, concatMap, of, share, tap } from 'rxjs';
 import { getNode, listNodes, resolveConfig } from './nodeRegistry.js';
 import { validateGraph } from './graphValidator.js';
@@ -46,7 +47,8 @@ export function toEvent(reading = {}) {
  *
  * @param {object} graph raw React Flow JSON `{ nodes, edges }`
  * @param {{ graphId?: string | null, dryRun?: boolean, onAlert?: (result: object) => void,
- *           trackActivity?: boolean, onActivity?: (activity: object) => void }} [options]
+ *           trackActivity?: boolean, onActivity?: (activity: object) => void,
+ *           onEdgeActivity?: (activity: object) => void }} [options]
  *   `dryRun` compiles the pipeline but never sends an SMS, calls a webhook or writes to the
  *   database; fired alerts are collected and returned by `getAlerts()`.
  *   `trackActivity` inserts a throttled `tap()` on every node that reports
@@ -61,6 +63,7 @@ export function compileGraph(graph, options = {}) {
     onAlert = null,
     trackActivity = false,
     onActivity = null,
+    onEdgeActivity = null,
   } = options;
   const emitActivity = trackActivity && typeof onActivity === 'function';
 
@@ -75,9 +78,11 @@ export function compileGraph(graph, options = {}) {
   const children = new Map(nodes.map((node) => [node.id, []]));
   /** @type {Map<string, string[]>} incoming neighbours (at most one per node) */
   const parents = new Map(nodes.map((node) => [node.id, []]));
+  const incomingEdges = new Map(nodes.map((node) => [node.id, []]));
   for (const edge of edges) {
     children.get(edge.source).push(edge.target);
     parents.get(edge.target).push(edge.source);
+    incomingEdges.get(edge.target).push(edge);
   }
 
   /** @type {Map<string, Subject<object>>} nodeId -> Subject (source nodes only) */
@@ -93,6 +98,21 @@ export function compileGraph(graph, options = {}) {
   const sourceNodes = nodes.filter((node) => node.definition.category === 'source');
   const actionNodes = nodes.filter((node) => node.definition.category === 'action');
   for (const node of sourceNodes) subjects.set(node.id, new Subject());
+
+  // Activity is opt-in and never allowed to break a rule. Edge ids come from the
+  // validated graph, not a lossy string reconstruction in the browser.
+  const reportActivity = (node, event) => {
+    const timestamp = new Date();
+    const tone = node.type === 'threshold' || node.definition.category === 'action' ? 'alert' : 'data';
+    try { onActivity({ graphId, nodeId: node.id, value: event?.value, timestamp, tone,
+      label: node.type === 'movingAverage' ? 'avg' : node.type === 'scale' ? 'scaled' : 'value', unit: event?.unit }); }
+    catch { /* listener isolation */ }
+    if (typeof onEdgeActivity === 'function') {
+      for (const edge of incomingEdges.get(node.id)) {
+        try { onEdgeActivity({ graphId, edgeId: edge.id, timestamp, tone }); } catch { /* listener isolation */ }
+      }
+    }
+  };
 
   /** Guard against a malformed graph reaching unbounded recursion (defensive; validator rejects cycles). */
   function buildStream(nodeId, path = []) {
@@ -120,7 +140,7 @@ export function compileGraph(graph, options = {}) {
         stream$ = input$.pipe(
           operator,
           catchError((error) => {
-            console.error(`[compiler] node "${nodeId}" (${node.type}) failed: ${error.message}`);
+            logger.error({ err: error }, `[compiler] node "${nodeId}" (${node.type}) failed`);
             return EMPTY;
           }),
         );
@@ -131,10 +151,7 @@ export function compileGraph(graph, options = {}) {
     // (throttled downstream by the WebSocket layer). Zero cost when trackActivity is off.
     if (emitActivity) {
       stream$ = stream$.pipe(
-        tap((event) => {
-          try { onActivity({ graphId, nodeId, value: event?.value, timestamp: new Date() }); }
-          catch { /* an activity listener must never break the pipeline */ }
-        }),
+        tap((event) => reportActivity(node, event)),
       );
     }
 
@@ -176,10 +193,7 @@ export function compileGraph(graph, options = {}) {
     // the action (i.e. the ones that passed every upstream condition).
     const actionInput$ = emitActivity
       ? input$.pipe(
-        tap((event) => {
-          try { onActivity({ graphId, nodeId: node.id, value: event?.value, timestamp: new Date() }); }
-          catch { /* an activity listener must never break the pipeline */ }
-        }),
+        tap((event) => reportActivity(node, event)),
       )
       : input$;
 
@@ -199,12 +213,12 @@ export function compileGraph(graph, options = {}) {
             triggeredAt: new Date(),
           }))),
         catchError((error) => {
-          console.error(`[compiler] action "${node.id}" (${node.type}) failed: ${error.message}`);
+          logger.error({ err: error }, `[compiler] action "${node.id}" (${node.type}) failed`);
           return EMPTY;
         }),
       )),
       catchError((error) => {
-        console.error(`[compiler] pipeline for action "${node.id}" stopped: ${error.message}`);
+        logger.error({ err: error }, `[compiler] pipeline for action "${node.id}" stopped`);
         return EMPTY;
       }),
     );
@@ -216,10 +230,10 @@ export function compileGraph(graph, options = {}) {
         try {
           onAlert?.(result);
         } catch (error) {
-          console.error(`[compiler] alert listener failed: ${error.message}`);
+          logger.error({ err: error }, `[compiler] alert listener failed`);
         }
       },
-      error: (error) => console.error(`[compiler] action "${node.id}" subscription error: ${error.message}`),
+      error: (error) => logger.error({ err: error }, `[compiler] action "${node.id}" subscription error`),
     }));
   }
 

@@ -5,6 +5,8 @@ export function validate(schema, source = 'body') {
       return res.status(400).json({
         error: {
           message: 'Validation failed.',
+          code: 'VALIDATION_ERROR',
+          requestId: req.id,
           details: result.error.issues.map(({ path, message }) => ({ path: path.join('.'), message })),
         },
       });

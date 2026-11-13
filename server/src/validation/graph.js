@@ -12,6 +12,7 @@ export const graphSchema = z.object({
   name: z.string().trim().min(1).max(100),
   nodes: z.array(nodeSchema).max(500),
   edges: z.array(edgeSchema).max(2000),
+  templateKey: z.string().trim().max(80).optional(),
   viewport: z.object({
     x: z.number().finite(),
     y: z.number().finite(),

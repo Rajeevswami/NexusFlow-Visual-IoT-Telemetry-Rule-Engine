@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { addEdge, useEdgesState, useNodesState, useReactFlow } from '@xyflow/react';
-import { AlertTriangle, CheckCircle2, ChevronRight, CircleHelp, PencilLine, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronRight, CircleHelp, Copy, LayoutDashboard, LoaderCircle, PencilLine, PlayCircle, RadioTower, Redo2, Square, Undo2, X } from 'lucide-react';
 import FlowCanvas from '../components/canvas/FlowCanvas.jsx';
 import NodePalette from '../components/canvas/NodePalette.jsx';
 import { validateGraph } from '../components/canvas/graphRules.js';
-import { getDefinition, initialEdges, initialNodes, makeNode } from '../components/nodes/definitions.js';
+import { getDefinition, initialEdges, initialNodes, makeNode, nextNodeId } from '../components/nodes/definitions.js';
 import FlowInspector from '../components/FlowInspector.jsx';
 import GraphPicker from '../components/GraphPicker.jsx';
 import Navbar from '../components/layout/Navbar.jsx';
 import ValidationPanel from '../components/ValidationPanel.jsx';
-import { errorMessage, graphApi, telemetryApi } from '../services/api.js';
-import { copyText, downloadJson, graphFilename, serializeGraph, toJsonString } from '../services/graphSerializer.js';
+import { demoApi, errorMessage, graphApi, telemetryApi } from '../services/api.js';
+import { useGraphHistory } from '../hooks/useGraphHistory.js';
+import { layoutGraph } from '../services/autoLayout.js';
+import { ActivityProvider } from '../components/canvas/ActivityProvider.jsx';
+import TemplatesMenu from '../components/canvas/TemplatesMenu.jsx';
+import DemoLivePanel from '../components/demo/DemoLivePanel.jsx';
+import { copyText, downloadJson, graphFilename, serializeGraph, serializeNode, serializeEdge, toJsonString } from '../services/graphSerializer.js';
 import { useTelemetry } from '../services/useTelemetry.js';
 import { useChannel } from '../ws/useChannel.js';
 
@@ -19,7 +24,7 @@ const NODE_OFFSET = { x: 130, y: 46 };
 
 export default function EditorPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges.map((edge) => ({ ...edge, type: 'glowEdge' })));
   const [name, setName] = useState('Turbine overheat rule');
   const [health, setHealth] = useState('checking');
   const [saving, setSaving] = useState(false);
@@ -36,6 +41,15 @@ export default function EditorPage() {
   const [activation, setActivation] = useState({ status: 'inactive', message: '' });
   const [activating, setActivating] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [liveMode, setLiveMode] = useState(() => { try { return localStorage.getItem('nexusflow-live-mode') !== 'off'; } catch { return true; } });
+  const [demoMode, setDemoMode] = useState(false);
+  const [demoBusy, setDemoBusy] = useState(false);
+  const [layoutBusy, setLayoutBusy] = useState(false);
+  const [needsActivation, setNeedsActivation] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const history = useGraphHistory(nodes, edges, setNodes, setEdges);
+  const signatureOf = (graphName, graphNodes, graphEdges) => JSON.stringify({ name: graphName, nodes: graphNodes.map(serializeNode), edges: graphEdges.map(serializeEdge) });
+  const savedSignature = useRef(signatureOf('Turbine overheat rule', initialNodes, initialEdges));
   const canvasRef = useRef(null);
   const nameRef = useRef(null);
   const exportRef = useRef('');
@@ -47,6 +61,7 @@ export default function EditorPage() {
   useChannel(graphId ? `graph:${graphId}` : null, useCallback((message) => {
     if (message.type !== 'graph_status' || !message.data) return;
     const { status } = message.data;
+    if (status !== 'active' && status !== 'error') setDemoMode(false); // includes automatic demo timeout
     setActivation((current) => {
       if (status === 'active') return { status: 'active', message: 'Pipeline is evaluating live telemetry.' };
       if (status === 'error') return { status: 'error', message: 'Activation failed.' };
@@ -54,6 +69,9 @@ export default function EditorPage() {
       return current;
     });
   }, []));
+
+  useEffect(() => { setDirty(signatureOf(name, nodes, edges) !== savedSignature.current); }, [name, nodes, edges]);
+  useEffect(() => { try { localStorage.setItem('nexusflow-live-mode', liveMode ? 'on' : 'off'); } catch { /* optional storage */ } }, [liveMode]);
 
   // ------------------------------------------------------------- backend health
   useEffect(() => {
@@ -76,7 +94,7 @@ export default function EditorPage() {
 
   // ------------------------------------------------------------------ graph ops
   const onConnect = useCallback((connection) => {
-    setEdges((current) => addEdge({ ...connection, type: 'smoothstep' }, current));
+    setEdges((current) => addEdge({ ...connection, type: 'glowEdge' }, current));
   }, [setEdges]);
 
   function addNode(type, position, config) {
@@ -124,6 +142,69 @@ export default function EditorPage() {
     flow.fitView({ nodes: [{ id: nodeId }], duration: 400, maxZoom: 1.2, padding: 0.6 });
   }
 
+  const duplicateSelected = useCallback(() => {
+    const selected = nodes.filter((node) => node.selected);
+    if (!selected.length) { setNotice({ type: 'error', message: 'Select one or more nodes to duplicate.' }); return; }
+    const ids = new Map(selected.map((node) => [node.id, nextNodeId(node.type)]));
+    const clones = selected.map((node) => ({ ...node, id: ids.get(node.id), position: { x: node.position.x + 48, y: node.position.y + 48 }, data: { ...node.data, config: { ...node.data?.config } }, selected: true }));
+    const internalEdges = edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)).map((edge) => ({ ...edge, id: nextNodeId('edge'), source: ids.get(edge.source), target: ids.get(edge.target), type: 'glowEdge', selected: true }));
+    setNodes((current) => [...current.map((node) => ({ ...node, selected: false })), ...clones]);
+    setEdges((current) => [...current.map((edge) => ({ ...edge, selected: false })), ...internalEdges]);
+  }, [nodes, edges, setNodes, setEdges]);
+
+  useEffect(() => {
+    const handleKey = (event) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      const key = event.key.toLowerCase();
+      const editable = event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"]');
+      if (key === 's') { event.preventDefault(); if (!saving) saveGraph(); return; }
+      if (editable) return;
+      if (key === 'z') { event.preventDefault(); event.shiftKey ? history.redo() : history.undo(); }
+      if (key === 'y') { event.preventDefault(); history.redo(); }
+      if (key === 'd') { event.preventDefault(); duplicateSelected(); }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  });
+
+  async function autoLayout() {
+    setLayoutBusy(true);
+    try { const arranged = await layoutGraph(nodes, edges); setNodes(arranged); requestAnimationFrame(() => flow.fitView({ padding: 0.18, duration: 350, maxZoom: 1 })); }
+    catch (error) { setNotice({ type: 'error', message: errorMessage(error) }); }
+    finally { setLayoutBusy(false); }
+  }
+
+  function applyTemplate(graph) {
+    const nextNodes = graph.nodes ?? [];
+    const nextEdges = (graph.edges ?? []).map((edge) => ({ ...edge, type: 'glowEdge' }));
+    setNodes(nextNodes); setEdges(nextEdges); setName(graph.name); setGraphId('');
+    setActivation({ status: 'inactive', message: '' }); setValidation(null); setDemoMode(false); setNeedsActivation(false);
+    history.reset(nextNodes, nextEdges); savedSignature.current = ''; setDirty(true);
+    requestAnimationFrame(() => flow.fitView({ padding: 0.18, maxZoom: 1, duration: 300 }));
+    setNotice({ type: 'success', message: 'Template loaded. Adjust it, then save and activate.' });
+  }
+
+  async function runDemo() {
+    setDemoBusy(true);
+    try {
+      const { data } = (await demoApi.start()).data;
+      const nextNodes = data.graph.nodes ?? [];
+      const nextEdges = (data.graph.edges ?? []).map((edge) => ({ ...edge, type: 'glowEdge' }));
+      setNodes(nextNodes); setEdges(nextEdges); setName(data.graph.name); setGraphId(data.graphId);
+      history.reset(nextNodes, nextEdges); savedSignature.current = signatureOf(data.graph.name, nextNodes, nextEdges); setDirty(false);
+      setActivation({ status: 'active', message: 'Demo simulator is running.' }); setNeedsActivation(false); setLiveMode(true); setDemoMode(true); setValidation(null);
+      requestAnimationFrame(() => flow.fitView({ padding: 0.18, maxZoom: 0.85, duration: 400 }));
+      setNotice({ type: 'success', message: data.activityEnabled ? 'Demo running — watch the alert path glow, then open Alerts → Mock Receiver.' : 'Demo running, but NODE_ACTIVITY_ENABLED is false on the server; glowing wires are disabled.' });
+    } catch (error) { setNotice({ type: 'error', message: errorMessage(error) }); }
+    finally { setDemoBusy(false); }
+  }
+  async function stopDemo() {
+    setDemoBusy(true);
+    try { await demoApi.stop(); setDemoMode(false); setActivation({ status: 'inactive', message: 'Demo stopped.' }); setNotice({ type: 'success', message: 'Demo simulator stopped and its graph was deactivated.' }); }
+    catch (error) { setNotice({ type: 'error', message: errorMessage(error) }); }
+    finally { setDemoBusy(false); }
+  }
+
   // ---------------------------------------------------------------- save / load
   async function saveGraph() {
     if (!name.trim()) {
@@ -135,11 +216,14 @@ export default function EditorPage() {
     try {
       const { viewport } = flow.toObject();
       const payload = serializeGraph(name, nodes, edges, viewport);
-      const created = await graphApi.create(payload);
-      setGraphId(created.data.data._id);
-      setActivation({ status: 'inactive', message: '' });
+      const response = graphId ? await graphApi.update(graphId, payload) : await graphApi.create(payload);
+      const saved = response.data.data;
+      setGraphId(saved._id);
+      setNeedsActivation(Boolean(graphId));
+      setActivation((current) => graphId ? { ...current, message: 'Saved changes are not live yet. Activate again to apply them.' } : { status: 'inactive', message: '' });
       setName(payload.name);
-      setNotice({ type: 'success', message: `Graph saved with ${payload.nodes.length} nodes and ${payload.edges.length} edges. Ready to Activate.` });
+      savedSignature.current = signatureOf(payload.name, nodes, edges); setDirty(false);
+      setNotice({ type: 'success', message: `Graph saved with ${payload.nodes.length} nodes and ${payload.edges.length} edges. ${graphId ? 'Activate again to apply changes.' : 'Ready to Activate.'}` });
     } catch (error) {
       setNotice({ type: 'error', message: errorMessage(error) });
     } finally {
@@ -162,11 +246,13 @@ export default function EditorPage() {
     setLoadingId(id);
     try {
       const graph = (await graphApi.get(id)).data.data;
-      setNodes(graph.nodes ?? []);
-      // Saved edges carry no `type`; re-apply the canvas default so the round trip is seamless.
-      setEdges((graph.edges ?? []).map((edge) => ({ type: 'smoothstep', ...edge })));
+      const loadedNodes = graph.nodes ?? [];
+      const loadedEdges = (graph.edges ?? []).map((edge) => ({ ...edge, type: 'glowEdge' }));
+      setNodes(loadedNodes); setEdges(loadedEdges);
+      history.reset(loadedNodes, loadedEdges);
       setName(graph.name ?? 'Untitled graph');
-      setGraphId(id);
+      savedSignature.current = signatureOf(graph.name ?? 'Untitled graph', loadedNodes, loadedEdges); setDirty(false);
+      setGraphId(id); setNeedsActivation(false); setDemoMode(false);
       setActivation({ status: 'inactive', message: '' });
       // A loaded graph may already be running — ask the engine so the badge is correct.
       graphApi.active()
@@ -247,6 +333,7 @@ export default function EditorPage() {
       const response = await graphApi.compile(graphId);
       const data = response.data.data;
       setActivation({ status: 'active', message: `Evaluating ${data.sources?.length ?? 0} source(s) live.` });
+      setNeedsActivation(false);
       setNotice({ type: 'success', message: `Pipeline active — ${data.nodeCount} nodes, ${data.subscriptions} subscription(s). Watch the Dashboard.` });
     } catch (error) {
       const details = error.response?.data?.error?.details;
@@ -322,18 +409,19 @@ export default function EditorPage() {
         onSendTestData={sendTestData}
         activating={activating}
         testing={testing}
+        allowRecompile={needsActivation}
       />
 
       <div className="editor-body">
         <NodePalette onAddNode={handlePaletteClick} />
-        <main className="work-area">
+        <main className={`work-area ${demoMode ? 'demo-split' : ''}`}>
           <div className="work-header">
             <div className="work-title">
               <div className="work-breadcrumb"><span>WORKSPACE</span><ChevronRight size={12} /><span>FLOW EDITOR</span></div>
               <div className="name-row">
                 <input ref={nameRef} aria-label="Graph name" value={name} maxLength={100} onChange={(event) => setName(event.target.value)} />
                 <PencilLine size={15} />
-                <span className="draft-badge"><i /> DRAFT</span>
+                <span className="draft-badge"><i /> {dirty ? 'UNSAVED' : graphId ? 'SAVED' : 'DRAFT'}</span>
               </div>
               <p>Bring your data and ideas together, one node at a time.</p>
             </div>
@@ -342,6 +430,11 @@ export default function EditorPage() {
               <i />
               <div><strong>{String(edges.length).padStart(2, '0')}</strong><span>CONNECTIONS</span></div>
             </div>
+          </div>
+
+          <div className="editor-toolbar" aria-label="Canvas tools">
+            <div className="tool-group"><button className="button button-ghost icon-button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!history.canUndo} onClick={history.undo}><Undo2 size={16} /></button><button className="button button-ghost icon-button" title="Redo (Ctrl+Y)" aria-label="Redo" disabled={!history.canRedo} onClick={history.redo}><Redo2 size={16} /></button><button className="button button-ghost" title="Duplicate selected nodes (Ctrl+D)" onClick={duplicateSelected}><Copy size={14} /><span>Duplicate</span></button><button className="button button-ghost" onClick={autoLayout} disabled={layoutBusy}>{layoutBusy ? <LoaderCircle size={14} className="spin" /> : <LayoutDashboard size={14} />}<span>Auto-layout</span></button><TemplatesMenu onSelect={applyTemplate} /></div>
+            <div className="tool-group"><button className={`button button-ghost live-toggle ${liveMode ? 'enabled' : ''}`} aria-pressed={liveMode} onClick={() => setLiveMode(!liveMode)} title="Toggle canvas glow effects"><RadioTower size={14} /> Live Mode <span className="toggle-track"><i /></span></button>{demoMode ? <button className="button button-ghost" onClick={stopDemo} disabled={demoBusy}><Square size={14} /> Stop Demo</button> : <button className="button button-demo" onClick={runDemo} disabled={demoBusy}>{demoBusy ? <LoaderCircle size={15} className="spin" /> : <PlayCircle size={15} />}{demoBusy ? 'Starting…' : 'Run Demo'}</button>}</div>
           </div>
 
           {validation && (
@@ -353,20 +446,23 @@ export default function EditorPage() {
             />
           )}
 
-          <FlowCanvas
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onDrop={handleDrop}
-            onInvalidConnection={showInvalidConnection}
-            canvasRef={canvasRef}
-          />
+          <ActivityProvider graphId={graphId} nodes={nodes} edges={edges} liveMode={liveMode}>
+            <FlowCanvas
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onDrop={handleDrop}
+              onInvalidConnection={showInvalidConnection}
+              canvasRef={canvasRef}
+            />
+          </ActivityProvider>
+          {demoMode && <DemoLivePanel deviceId={nodes.find((node) => node.type === 'sensor')?.data?.config?.deviceId || 'turbine-001'} sensorType={nodes.find((node) => node.type === 'sensor')?.data?.config?.sensorType || 'temperature'} threshold={Number(nodes.find((node) => node.type === 'threshold')?.data?.config?.value ?? 80)} />}
 
           <div className="workspace-footer">
             <span><i /> CANVAS MODE <b> / </b> FLOW EDITOR</span>
-            <span><CircleHelp size={14} /> Select a node or edge and press Delete to remove it.</span>
+            <span><CircleHelp size={14} /> Delete · Ctrl+S save · Ctrl+Z undo · Ctrl+Y redo · Ctrl+D duplicate</span>
             <span>MADE TO FLOW <span className="footer-star">✳</span></span>
           </div>
         </main>

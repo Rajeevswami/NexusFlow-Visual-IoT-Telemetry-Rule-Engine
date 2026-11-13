@@ -1,3 +1,4 @@
+import logger from '../config/logger.js';
 import { Alert } from '../models/Alert.js';
 
 /**
@@ -24,7 +25,7 @@ export async function recordAlert(alert) {
     });
     return saved.toObject();
   } catch (error) {
-    console.error(`Failed to persist alert for node ${alert.nodeId}: ${error.message}`);
+    logger.error({ err: error }, `Failed to persist alert for node ${alert.nodeId}`);
     return null;
   }
 }
