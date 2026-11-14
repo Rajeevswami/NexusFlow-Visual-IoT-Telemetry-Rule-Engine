@@ -5,6 +5,7 @@ import { telemetryBus } from './telemetryBus.js';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { secretEquals } from '../utils/sanitize.js';
+import { extractInsertedDocs } from '../utils/mongoErrors.js';
 
 /**
  * WebSocket layer: ingestion + channel-based fan-out on `/ws`.
@@ -49,6 +50,11 @@ const activityTimers = new Map();
 const edgeSentAt = new Map();
 const edgeTimers = new Map();
 const EDGE_ACTIVITY_WINDOW_MS = 100; // ≤10 events/second/edge, latest value wins
+// Throttle bookkeeping is keyed by graph+node/edge, so it grows with the number of
+// graphs the server has ever seen. Both maps are capped, and every entry of a graph is
+// dropped as soon as that graph stops running (see forgetGraphActivity).
+const ACTIVITY_KEY_LIMIT = 8192;
+const ACTIVITY_KEY_MAX_AGE_MS = 60_000;
 
 const CHANNEL_PATTERN = /^(alerts|telemetry|telemetry:[\w.:-]{1,120}|graph:[\w-]{1,120})$/;
 const ACTIVITY_WINDOW_MS = 300;
@@ -193,6 +199,7 @@ export function broadcastNodeActivity(activity) {
   const last = activitySentAt.get(key) ?? 0;
   if (now - last >= ACTIVITY_WINDOW_MS) {
     activitySentAt.set(key, now);
+    boundKeyMap(activitySentAt, activityTimers, now);
     publishToChannel(`graph:${graphId}`, 'node_activity', data);
     return;
   }
@@ -207,7 +214,9 @@ export function broadcastNodeActivity(activity) {
   activityTimers.set(key, timer);
 }
 
-/** Independent leading/trailing edge throttle; node protocol stays backward compatible. */
+/**
+ * Independent leading/trailing edge throttle; node protocol stays backward compatible.
+ */
 export function broadcastEdgeActivity(activity) {
   const { graphId, edgeId } = activity ?? {};
   if (!graphId || !edgeId || !channels.has(`graph:${graphId}`)) return;
@@ -217,6 +226,7 @@ export function broadcastEdgeActivity(activity) {
   const last = edgeSentAt.get(key) ?? 0;
   if (now - last >= EDGE_ACTIVITY_WINDOW_MS) {
     edgeSentAt.set(key, now);
+    boundKeyMap(edgeSentAt, edgeTimers, now);
     publishToChannel(`graph:${graphId}`, 'edge_activity', data);
     return;
   }
@@ -229,11 +239,48 @@ export function broadcastEdgeActivity(activity) {
   }, EDGE_ACTIVITY_WINDOW_MS - (now - last));
   entry.timer.unref?.();
   edgeTimers.set(key, entry);
-  // Maps are bounded even for long-lived servers with many short-lived graphs.
-  if (edgeSentAt.size > 8192) {
-    for (const [id, time] of edgeSentAt) if (now - time > 60_000 && !edgeTimers.has(id)) edgeSentAt.delete(id);
-    if (edgeSentAt.size > 8192) edgeSentAt.delete(edgeSentAt.keys().next().value);
+  boundKeyMap(edgeSentAt, edgeTimers, now);
+}
+
+/**
+ * Cap a "graphId:nodeId" -> timestamp map. Stale entries go first; if the map is still
+ * too large (a very wide burst inside the age window) the oldest key is dropped so a
+ * long-lived server cannot grow without bound.
+ */
+function boundKeyMap(sentAt, timers, now) {
+  if (sentAt.size <= ACTIVITY_KEY_LIMIT) return;
+  for (const [key, time] of sentAt) {
+    if (now - time > ACTIVITY_KEY_MAX_AGE_MS && !timers.has(key)) sentAt.delete(key);
   }
+  if (sentAt.size > ACTIVITY_KEY_LIMIT) sentAt.delete(sentAt.keys().next().value);
+}
+
+/**
+ * Drop every throttle entry that belongs to one graph. Called when a graph is
+ * deactivated (or deleted): its nodes can never emit again, so keeping the keys would
+ * leak memory for the lifetime of the process.
+ */
+function forgetGraphActivity(graphId) {
+  if (!graphId) return;
+  const prefix = `${graphId}:`;
+  for (const key of [...activitySentAt.keys()]) if (key.startsWith(prefix)) activitySentAt.delete(key);
+  for (const [key, timer] of [...activityTimers]) {
+    if (key.startsWith(prefix)) { clearTimeout(timer); activityTimers.delete(key); }
+  }
+  for (const key of [...edgeSentAt.keys()]) if (key.startsWith(prefix)) edgeSentAt.delete(key);
+  for (const [key, entry] of [...edgeTimers]) {
+    if (key.startsWith(prefix)) { clearTimeout(entry.timer); edgeTimers.delete(key); }
+  }
+}
+
+/** Test/ops helper: forget every throttle entry (used by the shutdown path). */
+export function forgetAllActivity() {
+  for (const timer of activityTimers.values()) clearTimeout(timer);
+  activityTimers.clear();
+  activitySentAt.clear();
+  for (const entry of edgeTimers.values()) clearTimeout(entry.timer);
+  edgeTimers.clear();
+  edgeSentAt.clear();
 }
 
 /** Final provider result; target is already masked by deliveryDto. */
@@ -246,6 +293,9 @@ export function broadcastDelivery(delivery) {
 /** Announce activation / deactivation / error of a pipeline to `graph:<id>` subscribers. */
 export function broadcastGraphStatus(graphId, status) {
   if (!graphId) return;
+  // A graph that is no longer running can never emit activity again: release its
+  // throttle bookkeeping instead of keeping the keys for the life of the process.
+  if (status === 'inactive') forgetGraphActivity(graphId);
   publishToChannel(`graph:${graphId}`, 'graph_status', { graphId, status });
 }
 
@@ -307,13 +357,21 @@ function handleTelemetry(socket, data) {
   const reading = parsed.data;
   sendJson(socket, 'ack', { accepted: 1, timestamp: reading.timestamp.toISOString() });
   setImmediate(async () => {
+    // Same durability contract as HTTP: only readings that are actually stored are
+    // fanned out, so the rule engine never evaluates data that is not in the database.
+    let inserted = [reading];
     try {
-      await Telemetry.insertMany([reading], { ordered: false, lean: true });
+      inserted = await Telemetry.insertMany([reading], { ordered: false, lean: true });
     } catch (error) {
-      logger.error({ err: error }, `WebSocket telemetry persist failed`);
+      const partial = extractInsertedDocs(error);
+      if (partial.length === 0) {
+        logger.error({ err: error }, 'WebSocket telemetry persist failed');
+        return;
+      }
+      inserted = partial;
     }
     try {
-      telemetryBus.ingest([reading]);
+      telemetryBus.ingest(inserted);
     } catch (error) {
       logger.error({ err: error }, `WebSocket telemetry fan-out failed`);
     }
@@ -400,12 +458,7 @@ export function attachWebSocketServer(httpServer) {
     busSubscription = null;
     for (const flusher of deviceFlushers.values()) if (flusher.timer) clearTimeout(flusher.timer);
     deviceFlushers.clear();
-    for (const timer of activityTimers.values()) clearTimeout(timer);
-    activityTimers.clear();
-    activitySentAt.clear();
-    for (const entry of edgeTimers.values()) clearTimeout(entry.timer);
-    edgeTimers.clear();
-    edgeSentAt.clear();
+    forgetAllActivity();
     channels.clear();
     socketServer = null;
   });

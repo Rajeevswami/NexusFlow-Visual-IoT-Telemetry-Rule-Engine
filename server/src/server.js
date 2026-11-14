@@ -41,6 +41,20 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
     shutdown(signal).then(() => process.exit(0)).catch((error) => { logger.fatal({ err: error }, 'Shutdown failed'); process.exit(1); });
   });
 }
+
+// Never let a stray rejection take the process down silently: log it with a request id
+// so it can be traced. An uncaught exception leaves the process in an unknown state, so
+// it is logged and then exits non-zero (the platform/container restarts it).
+process.on('unhandledRejection', (reason) => {
+  logger.error({ err: reason }, 'Unhandled promise rejection');
+});
+process.on('uncaughtException', (error) => {
+  logger.fatal({ err: error }, 'Uncaught exception; exiting');
+  shutdown('uncaught exception')
+    .catch(() => {})
+    .finally(() => process.exit(1));
+});
+
 try {
   await connectDatabase();
   server = http.createServer(app);
@@ -51,8 +65,21 @@ try {
     server.listen(env.port, '0.0.0.0', resolve);
   });
   logger.info({ port: env.port, websocket: '/ws' }, 'NexusFlow API listening');
+
+  // Re-hydration: recompile every graph that was running before the restart so a
+  // deploy, crash or free-tier sleep does not silently stop the rules. Failures are
+  // per-graph and never block the listening server.
+  activeGraphManager.hydrateActiveGraphs()
+    .then((summary) => {
+      if (summary.total > 0) {
+        logger.info({ ...summary }, 'Active graph re-hydration complete');
+      }
+    })
+    .catch((error) => logger.error({ err: error }, 'Active graph re-hydration failed'));
 } catch (error) {
   logger.fatal({ err: error }, 'Startup failed');
-  await shutdown('startup failure');
+  await shutdown('startup failure').catch((shutdownError) => {
+    logger.fatal({ err: shutdownError }, 'Shutdown after startup failure failed');
+  });
   process.exitCode = 1;
 }

@@ -1,6 +1,6 @@
 import logger from '../config/logger.js';
 import { EMPTY, Subject, catchError, concatMap, of, share, tap } from 'rxjs';
-import { getNode, listNodes, resolveConfig } from './nodeRegistry.js';
+import { getNode, resolveConfig } from './nodeRegistry.js';
 import { validateGraph } from './graphValidator.js';
 // Importing the node modules is what populates the registry.
 import './operators/index.js';
@@ -162,9 +162,23 @@ export function compileGraph(graph, options = {}) {
     return stream$;
   }
 
+  /**
+   * Pre-resolved source descriptors.
+   *
+   * `publish()` runs once per reading per active graph, so it must not re-merge node
+   * defaults or re-look-up definitions on the hot path: a graph's configuration is
+   * fixed at compile time and can only change by recompiling (which disposes this
+   * pipeline first).
+   * @type {{ subject: Subject<object>, matches: ((reading: object, config: object) => boolean) | null, config: object }[]}
+   */
+  const sourceRoutes = sourceNodes.map((node) => ({
+    subject: subjects.get(node.id),
+    matches: typeof node.definition.matches === 'function' ? node.definition.matches : null,
+    config: resolveConfig(node.type, node.config),
+  }));
+
   // --------------------------------------------------------------- actions
-  for (const node of actionNodes) {
-    const [parentId] = parents.get(node.id);
+  for (const node of actionNodes) {    const [parentId] = parents.get(node.id);
     if (!parentId) continue; // Disconnected action: the validator already warns.
 
     const config = resolveConfig(node.type, node.config);
@@ -263,8 +277,9 @@ export function compileGraph(graph, options = {}) {
     warnings: validation.warnings,
     subjects,
     subscriptions,
-    sources: sourceNodes.map((node) => {
-      const config = resolveConfig(node.type, node.config);
+    sources: sourceRoutes.map((route, index) => {
+      const node = sourceNodes[index];
+      const config = route.config;
       return {
         nodeId: node.id,
         type: node.type,
@@ -277,14 +292,21 @@ export function compileGraph(graph, options = {}) {
     /** Feed one persisted telemetry reading into every matching source node. */
     publish(reading) {
       if (disposed) return 0;
-      let delivered = 0;
-      for (const node of sourceNodes) {
-        const config = resolveConfig(node.type, node.config);
-        if (node.definition.matches && !node.definition.matches(reading, config)) continue;
-        subjects.get(node.id).next(toEvent(reading));
-        delivered += 1;
+      let matched = 0;
+      for (const route of sourceRoutes) {
+        if (route.matches && !route.matches(reading, route.config)) continue;
+        matched += 1;
       }
-      return delivered;
+      if (matched === 0) return 0;
+      // The event is the same for every source, so it is derived once; branches other
+      // than the first get a shallow copy so no operator can ever observe a shared,
+      // mutable value.
+      const shared = toEvent(reading);
+      for (const route of sourceRoutes) {
+        if (route.matches && !route.matches(reading, route.config)) continue;
+        route.subject.next(matched === 1 ? shared : { ...shared });
+      }
+      return matched;
     },
 
     /**
@@ -295,11 +317,10 @@ export function compileGraph(graph, options = {}) {
       if (disposed) return 0;
       let delivered = 0;
       for (const raw of values) {
-        for (const node of sourceNodes) {
-          const config = resolveConfig(node.type, node.config);
-          const event = buildEvent(raw, config);
-          if (node.definition.matches && !node.definition.matches({ metadata: event }, config)) continue;
-          subjects.get(node.id).next(event);
+        for (const route of sourceRoutes) {
+          const event = buildEvent(raw, route.config);
+          if (route.matches && !route.matches({ metadata: event }, route.config)) continue;
+          route.subject.next(event);
           delivered += 1;
         }
       }
@@ -327,11 +348,7 @@ export function compileGraph(graph, options = {}) {
 }
 
 /**
- * Node metadata for clients/UI (types, labels, defaults, categories), so the React
- * palette can stay in sync with the compiler instead of hard-coding node kinds.
+ * Re-exported so callers can resolve a node definition without importing the registry
+ * module directly (the registry is populated by the side-effect imports above).
  */
-export function describeNodes() {
-  return listNodes().map(({ type, category, label, defaults }) => ({ type, category, label, defaults }));
-}
-
 export { getNode };

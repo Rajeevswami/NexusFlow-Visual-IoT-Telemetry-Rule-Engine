@@ -23,8 +23,8 @@ class RuleExecutor {
   #routes = new Map();
   /** @type {Map<string, Set<Route>>} "deviceId:sensorType" -> routes with an exact source */
   #exact = new Map();
-  /** @type {{ route: Route, deviceId: string, sensorType: string }[]} wildcard sources only */
-  #wildcards = [];
+  /** @type {Map<Route, { deviceId: string, sensorType: string }[]>} wildcard sources, by route */
+  #wildcards = new Map();
   /** @type {import('rxjs').Subscription | null} bus subscription */
   #subscription = null;
   #routed = 0;
@@ -87,12 +87,14 @@ class RuleExecutor {
 
     /** @type {Route} */
     const route = { graphId, subject, subscription, sources: [] };
+    /** @type {{ deviceId: string, sensorType: string }[]} */
+    const wildcards = [];
     for (const source of sources) {
       const deviceId = source?.deviceId || WILDCARD;
       const sensorType = source?.sensorType || WILDCARD;
       route.sources.push({ deviceId, sensorType });
       if (deviceId === WILDCARD || sensorType === WILDCARD) {
-        this.#wildcards.push({ route, deviceId, sensorType });
+        wildcards.push({ deviceId, sensorType });
       } else {
         const key = `${deviceId}:${sensorType}`;
         let set = this.#exact.get(key);
@@ -100,6 +102,9 @@ class RuleExecutor {
         set.add(route);
       }
     }
+    // Keyed by route: unregistering is a single Map delete instead of a rebuild of the
+    // whole wildcard list, which matters when graphs are swapped at runtime.
+    if (wildcards.length > 0) this.#wildcards.set(route, wildcards);
     this.#routes.set(graphId, route);
     this.start();
     return route;
@@ -115,16 +120,14 @@ class RuleExecutor {
     if (!route) return false;
     route.subscription.unsubscribe();
     route.subject.complete();
+    this.#wildcards.delete(route);
     for (const source of route.sources) {
-      if (source.deviceId === WILDCARD || source.sensorType === WILDCARD) {
-        this.#wildcards = this.#wildcards.filter((entry) => entry.route !== route);
-      } else {
-        const key = `${source.deviceId}:${source.sensorType}`;
-        const set = this.#exact.get(key);
-        if (set) {
-          set.delete(route);
-          if (set.size === 0) this.#exact.delete(key);
-        }
+      if (source.deviceId === WILDCARD || source.sensorType === WILDCARD) continue;
+      const key = `${source.deviceId}:${source.sensorType}`;
+      const set = this.#exact.get(key);
+      if (set) {
+        set.delete(route);
+        if (set.size === 0) this.#exact.delete(key);
       }
     }
     this.#routes.delete(graphId);
@@ -146,10 +149,13 @@ class RuleExecutor {
     const matched = new Set();
     const exact = this.#exact.get(`${deviceId}:${sensorType}`);
     if (exact) for (const route of exact) matched.add(route);
-    for (const entry of this.#wildcards) {
-      if ((entry.deviceId === WILDCARD || entry.deviceId === deviceId)
-        && (entry.sensorType === WILDCARD || entry.sensorType === sensorType)) {
-        matched.add(entry.route);
+    for (const [route, entries] of this.#wildcards) {
+      for (const entry of entries) {
+        if ((entry.deviceId === WILDCARD || entry.deviceId === deviceId)
+          && (entry.sensorType === WILDCARD || entry.sensorType === sensorType)) {
+          matched.add(route);
+          break;
+        }
       }
     }
     if (matched.size === 0) return 0;
@@ -163,10 +169,12 @@ class RuleExecutor {
 
   /** Snapshot for `GET /api/engine/status` and tests. */
   stats() {
+    let wildcardSources = 0;
+    for (const entries of this.#wildcards.values()) wildcardSources += entries.length;
     return {
       activeRoutes: this.#routes.size,
       exactKeys: this.#exact.size,
-      wildcardSources: this.#wildcards.length,
+      wildcardSources,
       routedReadings: this.#routed,
       errors: this.#errors,
       started: this.#subscription !== null,

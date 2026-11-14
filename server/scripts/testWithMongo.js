@@ -1,7 +1,17 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const files = ['test/integration.test.js', 'test/day4Integration.test.js', 'test/validation.test.js', 'test/compilerRoutes.test.js', 'test/websocketChannels.test.js', 'test/websocketActivity.test.js', 'test/security.test.js'];
+const files = [
+  'test/validation.test.js',
+  'test/integration.test.js',
+  'test/apiIntegration.test.js',
+  'test/compilerRoutes.test.js',
+  'test/websocketChannels.test.js',
+  'test/websocketActivity.test.js',
+  'test/security.test.js',
+  'test/day4Integration.test.js',
+  'test/e2e.test.js',
+];
 let memory;
 let uri = process.env.TEST_MONGODB_URI;
 try {

@@ -12,11 +12,16 @@
     "simulate": "node scripts/simulator.js",
     "engine-check": "node scripts/engineCheck.js",
     "benchmark": "node scripts/benchmark.js",
-    "test": "vitest run && node --test --import ./test/testEnv.js test/validation.test.js test/integration.test.js test/compilerRoutes.test.js test/websocketChannels.test.js test/websocketActivity.test.js test/security.test.js test/day4Integration.test.js",
-    "test:compiler": "vitest run",
-    "test:http": "node --test --import ./test/testEnv.js test/validation.test.js test/integration.test.js test/compilerRoutes.test.js test/websocketChannels.test.js test/websocketActivity.test.js test/security.test.js test/day4Integration.test.js",
+    "storage-report": "node scripts/storageReport.js",
+    "rule-latency": "node scripts/ruleLatency.js",
     "seed": "node scripts/seed.js",
-    "test:db": "node scripts/testWithMongo.js"
+    "test:db": "node scripts/testWithMongo.js",
+    "test": "npm run test:unit && npm run test:http",
+    "test:unit": "vitest run",
+    "test:http": "node --test --import ./test/testEnv.js test/validation.test.js test/integration.test.js test/compilerRoutes.test.js test/websocketChannels.test.js test/websocketActivity.test.js test/security.test.js test/day4Integration.test.js test/apiIntegration.test.js test/e2e.test.js",
+    "test:coverage": "vitest run --coverage",
+    "test:compiler": "vitest run",
+    "bootstrap": "node scripts/seed.js --activate"
   },
   "dependencies": {
     "axios": "^1.21.1",
@@ -38,6 +43,7 @@
     "mongodb-memory-server": "^11.3.0",
     "nodemon": "^3.1.11",
     "supertest": "^7.2.2",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.0",
+    "@vitest/coverage-v8": "^5.1.0"
   }
 }

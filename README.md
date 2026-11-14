@@ -26,6 +26,32 @@ NexusFlow is a browser-based, no-code graph editor and live dashboard for IoT te
 - Live chart and alert feed; activity-enabled animated edges and nodes, value badges, light/dark themes, Live Mode and split-view demo.
 - Templated webhooks with custom headers, mock SMS/email, optional Twilio/SMTP, cooldowns, bounded queue, per-graph limits, retry and delivery audit.
 - Private-network SSRF blocking by default, ingestion API key, request limits, security headers, structured logging and graceful shutdown.
+- Active graphs are re-hydrated from MongoDB on boot, so a restart never silently stops the rules.
+
+## Live demo
+
+| | |
+|---|---|
+| Frontend | <https://your-app.vercel.app> *(placeholder — deploy with [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md))* |
+| API health | <https://your-api.onrender.com/api/health> *(placeholder)* |
+| API base URL | `https://your-api.onrender.com/api` *(placeholder)* |
+
+The deployed instance runs the mock SMS/email providers and the in-memory mock receiver, so
+nothing leaves the machine. Free-tier hosts sleep when idle — see
+[Waking the server](docs/DEPLOYMENT.md#7-waking-the-server-before-a-demo).
+
+## Screenshots
+
+> Placeholders — replace each file with a real capture (1920×1080, dark theme) before
+> submission. Keep the same filenames so the links keep working.
+
+| Editor | Dashboard |
+|---|---|
+| ![Graph editor with a sensor → moving average → threshold → SMS rule](docs/screenshots/editor.png) | ![Live dashboard with chart, stat cards and alert feed](docs/screenshots/dashboard.png) |
+
+| Alerts & deliveries | Glowing wires during the demo |
+|---|---|
+| ![Alert list with masked delivery targets and retry buttons](docs/screenshots/alerts.png) | ![Canvas with animated edges while telemetry flows](docs/screenshots/canvas-glow.png) |
 
 **Stack:** Node 20+, Express, MongoDB 5.0+ (time-series), Mongoose, RxJS, WebSocket, React, Vite, React Flow, Recharts and Dagre.
 
@@ -115,16 +141,96 @@ Connect to `/ws`. Send `{ "type":"subscribe", "channels":["telemetry:turbine-001
 ## Tests and tools
 
 ```sh
+# Server
 cd server
-npm test                 # unit + HTTP; DB tests skip without TEST_MONGODB_URI
-npm run test:compiler    # Vitest compiler, delivery and SSRF tests
-npm run test:db          # uses TEST_MONGODB_URI or downloads a temporary MongoDB binary
+npm test                 # unit (Vitest) + HTTP/WebSocket/security suites
+npm run test:coverage    # unit suite with a coverage summary
+npm run test:db          # everything, with a throwaway mongodb-memory-server
+npm run benchmark -- --duration 45 --target 5000   # writes/sec + p50/p95/p99 + errors
+npm run storage-report   # time-series vs an equivalent regular collection
+npm run rule-latency -- --samples 50                # POST -> alert over WebSocket
+npm run seed             # devices + template graphs + history
+npm run bootstrap        # the same, plus flag the primary rule active
 npm run simulate -- --devices 10 --interval 1000 --transport http --spikes 0.04
-npm run engine-check     # requires running server and MongoDB
-npm run benchmark -- --requests 100 --batch-size 100 --concurrency 10
-cd ../client && npm test && npm run build
+npm run engine-check     # end-to-end PASS/FAIL against a running server
+
+# Client
+cd ../client
+npm test                 # logic suite (Node) + canvas smoke tests (Vitest + RTL)
+npm run build
 ```
 
-`TEST_MONGODB_URI` must point to a **disposable** database: integration tests modify data. The automatic binary download needs network access to MongoDB's download host. Set `INGEST_API_KEY` in the shell for the simulator and benchmark if enabled. For Docker, add `--url http://localhost:8080` to simulator/benchmark commands run from the host. Benchmark results depend on hardware and configuration; no throughput guarantee is implied.
+Everything from the repository root:
 
-See [Architecture](docs/ARCHITECTURE.md) and [five-minute demo](docs/DEMO_SCRIPT.md).
+```sh
+npm test        # runs the server and client suites in sequence
+npm run test:coverage
+npm run build
+```
+
+The unit suite covers the validator, the operators, the stream compiler, the webhook
+service, the rule executor and the boot-time re-hydration. The HTTP suites cover telemetry
+ingestion, graph CRUD, compile/deactivate, alerts, deliveries, the WebSocket protocol and
+security hardening; the integration and end-to-end suites need a database.
+`TEST_MONGODB_URI` must point at a **disposable** database — integration tests modify data.
+The automatic binary download needs network access to MongoDB's download host.
+Set `INGEST_API_KEY` in the shell for the simulator and benchmark if enabled. For Docker,
+add `--url http://localhost:8080` to simulator/benchmark commands run from the host.
+Benchmark results depend on hardware and configuration; no throughput guarantee is implied.
+
+See [Architecture](docs/ARCHITECTURE.md), [Deployment](docs/DEPLOYMENT.md),
+[Final report](docs/FINAL_REPORT.md), [Audit report](docs/AUDIT_REPORT.md),
+[Performance report](docs/PERFORMANCE_REPORT.md), [Viva Q&A](docs/VIVA_QA.md),
+[Presentation outline](docs/PRESENTATION_OUTLINE.md), [Demo checklist](docs/DEMO_CHECKLIST.md)
+and the [five-minute demo script](docs/DEMO_SCRIPT.md).
+
+## Project structure
+
+```text
+NexusFlow-Visual-IoT-Telemetry-Rule-Engine/
+├── docker-compose.yml            # local stack: mongo + server + client (nginx)
+├── render.yaml                   # Render blueprint for the API
+├── package.json                  # root scripts: test / test:coverage / build
+├── client/                       # React + Vite frontend
+│   ├── vercel.json               # SPA rewrites + asset caching for Vercel
+│   ├── public/_redirects         # SPA fallback for Netlify
+│   ├── .env.example              # dev: VITE_API_BASE_URL / VITE_PROXY_TARGET
+│   ├── .env.production.example   # prod: VITE_API_URL / VITE_WS_URL
+│   └── src/
+│       ├── pages/                # EditorPage, DashboardPage, AlertsPage
+│       ├── components/
+│       │   ├── canvas/           # FlowCanvas, NodePalette, AnimatedEdge, ActivityProvider
+│       │   ├── nodes/            # node cards + definitions.js (shared node registry)
+│       │   ├── dashboard/        # LiveLineChart, StatCards, AlertFeed, EngineStatus
+│       │   └── layout/ demo/     # navbar, theme, toasts, demo split view
+│       ├── hooks/                # useTelemetrySeries, useGraphHistory
+│       ├── services/             # api, graphSerializer, autoLayout, activityStore
+│       ├── ws/                   # WebSocketProvider, useChannel
+│       └── test/                 # logic suite + Vitest/RTL canvas smoke tests
+├── server/                       # Express + Mongoose + RxJS API
+│   ├── Procfile                  # Railway / Heroku start command
+│   ├── .env.example              # development configuration
+│   ├── .env.production.example   # production configuration (annotated)
+│   ├── samples/                  # turbine-graph.json
+│   ├── scripts/                  # seed/bootstrap, simulator, benchmark, storageReport,
+│   │                             # ruleLatency, engineCheck, testWithMongo
+│   ├── src/
+│   │   ├── app.js  server.js     # Express wiring + boot (incl. re-hydration)
+│   │   ├── config/               # env (zod), db (time-series contract), logger (pino)
+│   │   ├── compiler/             # graphValidator, streamCompiler, nodeRegistry,
+│   │   │                         # operators/, actions/, sources/
+│   │   ├── controllers/ routes/  # HTTP layer (zod-validated)
+│   │   ├── integrations/         # webhookService, urlSafety (SSRF), sms/email, template
+│   │   ├── middleware/           # security (helmet/cors/limits), validate, errorHandler
+│   │   ├── models/               # Telemetry (time-series), Graph, Alert, DeliveryLog, Device
+│   │   ├── services/             # telemetryBus, ruleExecutor, activeGraphManager,
+│   │   │                         # websocket, deliveryService, outboundQueue, demoService
+│   │   ├── validation/           # zod schemas per route
+│   │   └── utils/                # httpError, sanitize, mongoErrors
+│   └── test/                     # Vitest unit suites + node --test HTTP/DB suites
+└── docs/
+    ├── ARCHITECTURE.md  DEMO_SCRIPT.md
+    ├── AUDIT_REPORT.md  PERFORMANCE_REPORT.md
+    ├── DEPLOYMENT.md  FINAL_REPORT.md  VIVA_QA.md
+    └── PRESENTATION_OUTLINE.md  DEMO_CHECKLIST.md
+```

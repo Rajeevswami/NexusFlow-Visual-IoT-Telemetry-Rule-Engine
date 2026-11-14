@@ -29,11 +29,3 @@ export async function recordAlert(alert) {
     return null;
   }
 }
-
-/**
- * @param {string} graphId
- * @param {number} [limit]
- */
-export async function listAlerts(graphId, limit = 50) {
-  return Alert.find({ graphId }).sort({ triggeredAt: -1 }).limit(Math.min(limit, 500)).lean();
-}

@@ -8,6 +8,11 @@ const graphSchema = new mongoose.Schema({
   viewport: { type: mongoose.Schema.Types.Mixed },
   // Reserved for idempotent seeds/demo templates; ordinary user graphs leave this unset.
   templateKey: { type: String, trim: true, maxlength: 80 },
+  // Mirrors "a compiled pipeline for this graph is running in this process".
+  // Set by ActiveGraphManager on activate/deactivate and read by the boot-time
+  // re-hydration in server.js. It is a cache of runtime state, never a source of
+  // truth for correctness: a stale `true` simply re-activates the graph on boot.
+  isActive: { type: Boolean, default: false, index: true },
 }, { timestamps: true, minimize: false, versionKey: false });
 graphSchema.index({ templateKey: 1 }, { unique: true, sparse: true });
 

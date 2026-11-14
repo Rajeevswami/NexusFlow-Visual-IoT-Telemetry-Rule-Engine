@@ -11,7 +11,7 @@ export async function createGraph(req, res) {
 
 export async function listGraphs(req, res) {
   // Keep the picker response small; GET by ID returns the complete graph.
-  const graphs = await Graph.find().select('name createdAt updatedAt').sort({ updatedAt: -1 }).limit(100).lean();
+  const graphs = await Graph.find().select('name createdAt updatedAt isActive').sort({ updatedAt: -1 }).limit(100).lean();
   res.json({ data: graphs });
 }
 
@@ -27,12 +27,21 @@ export async function updateGraph(req, res) {
     runValidators: true,
   }).lean();
   if (!graph) return res.status(404).json({ error: { message: 'Graph not found.' } });
+  // A running pipeline is compiled from the saved JSON. Editing the document must not
+  // leave the previous version evaluating live telemetry: stop it and let the client
+  // re-activate (the editor already prompts for this).
+  if (activeGraphManager.deactivate(String(graph._id))) {
+    broadcastGraphStatus(String(graph._id), 'inactive');
+  }
   return res.json({ data: graph });
 }
 
 export async function deleteGraph(req, res) {
   const graph = await Graph.findByIdAndDelete(res.locals.validated.params.id).lean();
   if (!graph) return res.status(404).json({ error: { message: 'Graph not found.' } });
+  // Deleting an active graph used to leave the pipeline running: telemetry kept being
+  // routed to it and alerts kept firing for a graph that no longer exists.
+  activeGraphManager.deactivate(String(graph._id));
   return res.status(204).end();
 }
 
@@ -52,6 +61,7 @@ export async function validateGraphJson(req, res) {
 
 /**
  * POST /api/graphs/:id/compile — validate + compile a saved graph and activate it.
+ * Activating twice is safe: the previous pipeline is disposed and replaced.
  */
 export async function compileGraphHandler(req, res) {
   const { id } = res.locals.validated.params;
@@ -70,11 +80,11 @@ export async function compileGraphHandler(req, res) {
       },
     });
   } catch (error) {
+    // Only a graph that really exists can be in an error state; a 404 stays a 404.
+    if (error.status !== 404) broadcastGraphStatus(id, 'error');
     if (error instanceof GraphValidationError) {
-      broadcastGraphStatus(id, 'error');
       return res.status(400).json({ error: { message: 'Graph is not valid.', details: error.errors, warnings: error.warnings } });
     }
-    broadcastGraphStatus(id, 'error');
     throw error;
   }
 }

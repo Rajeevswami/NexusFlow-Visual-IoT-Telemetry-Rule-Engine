@@ -1,0 +1,8 @@
+# Railway / Heroku-style process file (alternative to render.yaml).
+#
+#   Railway: New Project -> Deploy from GitHub -> set Root Directory to `server`.
+#   Railway detects Node automatically; this file only pins the start command.
+#
+#   Set the same environment variables listed in render.yaml and docs/DEPLOYMENT.md.
+#   Railway exposes the HTTP port in $PORT, which the server already reads.
+web: npm start

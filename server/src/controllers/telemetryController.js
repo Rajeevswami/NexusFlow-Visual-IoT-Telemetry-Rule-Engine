@@ -1,6 +1,7 @@
 import logger from '../config/logger.js';
 import { Telemetry } from '../models/Telemetry.js';
 import { telemetryBus } from '../services/telemetryBus.js';
+import { extractInsertedDocs } from '../utils/mongoErrors.js';
 
 /**
  * Persist the readings, respond 202 immediately, then fan out.
@@ -9,11 +10,30 @@ import { telemetryBus } from '../services/telemetryBus.js';
  * delivery. `insertMany` runs first so the 202 is honest about durability; everything
  * else (telemetryBus -> ruleExecutor -> RxJS pipelines, channel broadcast) happens on
  * the next tick after the response is flushed.
+ *
+ * `ordered: false` lets MongoDB apply every document it can. When some documents fail
+ * the driver throws a bulk-write error *after* the rest are already durable, so the
+ * successfully inserted documents are recovered from the error and still published to
+ * the rule engine — reporting a 500 and silently dropping them would both lose data
+ * and stop the rules from ever seeing it.
  */
+function extractInserted(error) {
+  return extractInsertedDocs(error);
+}
+
 async function insertAndAccept(readings, res) {
-  // Zod has already validated/cast the complete payload. lean avoids a second
-  // Mongoose hydration/validation pass on this high-throughput path.
-  const inserted = await Telemetry.insertMany(readings, { ordered: false, lean: true });
+  let inserted;
+  try {
+    // Zod has already validated/cast the complete payload. lean avoids a second
+    // Mongoose hydration/validation pass on this high-throughput path.
+    inserted = await Telemetry.insertMany(readings, { ordered: false, lean: true });
+  } catch (error) {
+    const partial = extractInserted(error);
+    if (partial.length === 0) throw error; // nothing is durable: report the real failure
+    inserted = partial;
+    logger.warn({ err: error, requested: readings.length, accepted: partial.length },
+      'Batch partially stored; only the durable readings were fanned out');
+  }
   res.status(202).json({ accepted: inserted.length });
   setImmediate(() => {
     try { telemetryBus.ingest(inserted); }
