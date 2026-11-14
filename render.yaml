@@ -1,0 +1,66 @@
+# Render blueprint for the NexusFlow API.
+#
+#   Render dashboard -> New -> Blueprint -> pick this repository.
+#   Render reads this file, creates the service and asks for the `sync: false` secrets.
+#
+# Free tier notes:
+#   * WebSockets are supported (they are ordinary HTTP upgrades) and the client
+#     reconnects with exponential backoff if the socket drops.
+#   * Free web services sleep after a period of inactivity, so the first request after
+#     a quiet spell pays a cold start. See docs/DEPLOYMENT.md for how to wake it.
+#   * `INGEST_API_KEY` is generated once by Render; copy it into the client only if you
+#     run the simulator/benchmark against the deployed API.
+
+services:
+  - type: web
+    name: nexusflow-api
+    runtime: node
+    plan: free
+    region: singapore # change to the region closest to your MongoDB Atlas cluster
+    rootDir: server
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # MongoDB Atlas: use a 5.0+ cluster (time-series collections need 5.0+).
+      - key: MONGODB_URI
+        sync: false
+      # Comma-separated list of the deployed frontend origins. No trailing slash.
+      - key: CLIENT_ORIGIN
+        sync: false
+      # Required in production: HTTP and WebSocket ingestion reject requests without it.
+      - key: INGEST_API_KEY
+        generateValue: true
+      # Canvas instrumentation (glowing wires) costs one tap per node per reading.
+      # Keep it off on a free tier; the dashboard and alerts work without it.
+      - key: NODE_ACTIVITY_ENABLED
+        value: "false"
+      - key: LOG_LEVEL
+        value: info
+      - key: API_RATE_LIMIT
+        value: "300"
+      - key: INGEST_RATE_LIMIT
+        value: "6000"
+      # SSRF protection stays ON. Never enable this against the public internet.
+      - key: ALLOW_PRIVATE_WEBHOOKS
+        value: "false"
+      # Demo endpoints are public by design; leave them off unless you are demoing.
+      - key: DEMO_ENABLED
+        value: "false"
+      - key: MOCK_RECEIVER_ENABLED
+        value: "false"
+      # Outbound delivery budget (per graph, per minute) and retry backoff.
+      - key: OUTBOUND_CONCURRENCY
+        value: "4"
+      - key: OUTBOUND_QUEUE_LIMIT
+        value: "1000"
+      - key: OUTBOUND_RATE_PER_MINUTE
+        value: "30"
+      # Mock providers need no credentials. Set twilio/smtp only with real secrets.
+      - key: SMS_PROVIDER
+        value: mock
+      - key: EMAIL_PROVIDER
+        value: mock

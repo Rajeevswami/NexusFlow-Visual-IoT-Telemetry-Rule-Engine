@@ -1,0 +1,29 @@
+{
+  "name": "nexusflow",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NexusFlow: Visual IoT Telemetry & Rule Engine (MERN + React Flow + RxJS)",
+  "scripts": {
+    "install:all": "npm --prefix server ci && npm --prefix client ci",
+    "dev": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "start": "npm --prefix server start",
+    "build": "npm --prefix client run build",
+    "seed": "npm --prefix server run seed",
+    "bootstrap": "npm --prefix server run bootstrap",
+    "simulate": "npm --prefix server run simulate",
+    "engine-check": "npm --prefix server run engine-check",
+    "benchmark": "npm --prefix server run benchmark",
+    "storage-report": "npm --prefix server run storage-report",
+    "rule-latency": "npm --prefix server run rule-latency",
+    "test": "npm run test:server && npm run test:client",
+    "test:server": "npm --prefix server test",
+    "test:client": "npm --prefix client test",
+    "test:coverage": "npm --prefix server run test:coverage",
+    "test:db": "npm --prefix server run test:db",
+    "test:all": "npm run test:coverage && npm run test:server && npm run test:client && npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

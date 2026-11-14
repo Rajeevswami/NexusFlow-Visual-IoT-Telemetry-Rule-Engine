@@ -1,8 +1,12 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
-const booleanFlag = (defaultValue) => z.union([z.boolean(), z.string()]).optional()
-  .transform((value) => value === undefined ? defaultValue : ['true', '1', 'yes', 'on'].includes(String(value).toLowerCase()));
+/**
+ * Tri-state flag: `undefined` means "not configured", so the schema can apply a
+ * different default for development and production (see `nodeActivityEnabled`).
+ */
+const booleanFlag = z.union([z.boolean(), z.string()]).optional()
+  .transform((value) => (value === undefined ? undefined : ['true', '1', 'yes', 'on'].includes(String(value).toLowerCase())));
 const positiveInt = (defaultValue, max = 100_000) => z.preprocess(
   (value) => (value === '' || value === undefined ? undefined : value),
   z.coerce.number().int().min(1).max(max).default(defaultValue),
@@ -17,13 +21,13 @@ const envSchema = z.object({
     (value) => (value === '' || value === undefined ? undefined : value),
     z.coerce.number().int().positive().optional(),
   ),
-  NODE_ACTIVITY_ENABLED: booleanFlag(true),
+  NODE_ACTIVITY_ENABLED: booleanFlag,
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   REQUEST_SIZE_LIMIT: z.string().regex(/^\d+(b|kb|mb)$/i).default('1mb'),
   API_RATE_LIMIT: positiveInt(300),
   INGEST_RATE_LIMIT: positiveInt(6000, 1_000_000),
   INGEST_API_KEY: z.string().max(512).default(''),
-  ALLOW_PRIVATE_WEBHOOKS: booleanFlag(false),
+  ALLOW_PRIVATE_WEBHOOKS: booleanFlag,
   OUTBOUND_CONCURRENCY: positiveInt(4, 32),
   OUTBOUND_QUEUE_LIMIT: positiveInt(1000, 10_000),
   OUTBOUND_RATE_PER_MINUTE: positiveInt(30, 10_000),
@@ -35,12 +39,12 @@ const envSchema = z.object({
   EMAIL_PROVIDER: z.enum(['mock', 'smtp']).default('mock'),
   SMTP_HOST: z.string().default(''),
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
-  SMTP_SECURE: booleanFlag(false),
+  SMTP_SECURE: booleanFlag,
   SMTP_USER: z.string().default(''),
   SMTP_PASS: z.string().default(''),
   EMAIL_FROM: z.string().default('nexusflow@example.com'),
-  MOCK_RECEIVER_ENABLED: booleanFlag(false),
-  DEMO_ENABLED: booleanFlag(false),
+  MOCK_RECEIVER_ENABLED: booleanFlag,
+  DEMO_ENABLED: booleanFlag,
   DEMO_WEBHOOK_URL: z.string().default(''),
 }).superRefine((value, context) => {
   if (value.NODE_ENV === 'production' && !value.INGEST_API_KEY.trim()) {
@@ -67,19 +71,28 @@ if (!result.success) {
 }
 const value = result.data;
 const localDemo = value.NODE_ENV !== 'production';
+const clientOrigins = value.CLIENT_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean);
+if (clientOrigins.length === 0) {
+  // An empty allow-list silently rejects every cross-origin browser request, which is
+  // almost always a deployment mistake rather than an intention.
+  throw new Error('Invalid environment configuration: CLIENT_ORIGIN: at least one origin is required.');
+}
 export const env = {
   nodeEnv: value.NODE_ENV,
   port: value.PORT,
   mongoUri: value.MONGODB_URI,
-  clientOrigins: value.CLIENT_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean),
+  clientOrigins,
   telemetryRetentionSeconds: value.TELEMETRY_RETENTION_SECONDS,
-  nodeActivityEnabled: value.NODE_ACTIVITY_ENABLED,
+  // Canvas instrumentation costs one tap() per node per reading plus WebSocket traffic.
+  // It is on for the local demo/development experience and off in production unless
+  // explicitly enabled.
+  nodeActivityEnabled: value.NODE_ACTIVITY_ENABLED ?? localDemo,
   logLevel: value.LOG_LEVEL,
   requestSizeLimit: value.REQUEST_SIZE_LIMIT,
   apiRateLimit: value.API_RATE_LIMIT,
   ingestRateLimit: value.INGEST_RATE_LIMIT,
   ingestApiKey: value.INGEST_API_KEY.trim(),
-  allowPrivateWebhooks: value.ALLOW_PRIVATE_WEBHOOKS,
+  allowPrivateWebhooks: value.ALLOW_PRIVATE_WEBHOOKS ?? false,
   outboundConcurrency: value.OUTBOUND_CONCURRENCY,
   outboundQueueLimit: value.OUTBOUND_QUEUE_LIMIT,
   outboundRatePerMinute: value.OUTBOUND_RATE_PER_MINUTE,
@@ -87,8 +100,8 @@ export const env = {
   smsProvider: value.SMS_PROVIDER,
   twilio: { accountSid: value.TWILIO_ACCOUNT_SID, authToken: value.TWILIO_AUTH_TOKEN, from: value.TWILIO_FROM },
   emailProvider: value.EMAIL_PROVIDER,
-  smtp: { host: value.SMTP_HOST, port: value.SMTP_PORT, secure: value.SMTP_SECURE, user: value.SMTP_USER, pass: value.SMTP_PASS, from: value.EMAIL_FROM },
-  mockReceiverEnabled: value.MOCK_RECEIVER_ENABLED || localDemo,
-  demoEnabled: value.DEMO_ENABLED || localDemo,
+  smtp: { host: value.SMTP_HOST, port: value.SMTP_PORT, secure: value.SMTP_SECURE ?? false, user: value.SMTP_USER, pass: value.SMTP_PASS, from: value.EMAIL_FROM },
+  mockReceiverEnabled: value.MOCK_RECEIVER_ENABLED ?? localDemo,
+  demoEnabled: value.DEMO_ENABLED ?? localDemo,
   demoWebhookUrl: value.DEMO_WEBHOOK_URL || `http://127.0.0.1:${value.PORT}/api/mock/webhook-receiver`,
 };

@@ -16,7 +16,22 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 
 const WebSocketContext = createContext(null);
 
+/**
+ * Where the socket connects.
+ *
+ * Same-origin by default (the Vite dev proxy and the production nginx/reverse proxy
+ * both forward `/ws`), but a separately hosted frontend must be told where the API
+ * lives — otherwise the browser would dial its own origin and get a 404. In production
+ * this must be a `wss://` URL: browsers reject insecure WebSockets from HTTPS pages.
+ */
 function wsUrl() {
+  const configured = import.meta.env.VITE_WS_URL;
+  if (configured) {
+    const url = new URL(configured, window.location.origin);
+    if (url.protocol === 'http:') url.protocol = 'ws:';
+    if (url.protocol === 'https:') url.protocol = 'wss:';
+    return url.toString();
+  }
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${window.location.host}/ws`;
 }

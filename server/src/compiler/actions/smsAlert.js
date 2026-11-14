@@ -2,7 +2,7 @@ import { registerNode } from '../nodeRegistry.js';
 import { dispatchAction } from '../../services/deliveryService.js';
 import { buildActionRequest } from '../../integrations/actionRequests.js';
 import { maskPhone } from '../../utils/sanitize.js';
-import { cooldownErrors, renderTemplate } from './template.js';
+import { cooldownErrors } from './template.js';
 
 const DEFAULT_TEMPLATE = 'ALERT ${deviceId} ${sensorType} = ${value}${unit}';
 

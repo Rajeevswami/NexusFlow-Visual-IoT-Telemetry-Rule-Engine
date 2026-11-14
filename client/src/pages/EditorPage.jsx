@@ -152,20 +152,25 @@ export default function EditorPage() {
     setEdges((current) => [...current.map((edge) => ({ ...edge, selected: false })), ...internalEdges]);
   }, [nodes, edges, setNodes, setEdges]);
 
+  // Keyboard shortcuts. The handler is kept in a ref and the listener is attached once:
+  // attaching it in an effect without dependencies ran on every render (and therefore
+  // on every drag frame of a node), which is wasted work on the canvas.
+  const shortcutsRef = useRef(null);
+  shortcutsRef.current = (event) => {
+    if (!(event.ctrlKey || event.metaKey)) return;
+    const key = event.key.toLowerCase();
+    const editable = event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"]');
+    if (key === 's') { event.preventDefault(); if (!saving) saveGraph(); return; }
+    if (editable) return;
+    if (key === 'z') { event.preventDefault(); event.shiftKey ? history.redo() : history.undo(); }
+    if (key === 'y') { event.preventDefault(); history.redo(); }
+    if (key === 'd') { event.preventDefault(); duplicateSelected(); }
+  };
   useEffect(() => {
-    const handleKey = (event) => {
-      if (!(event.ctrlKey || event.metaKey)) return;
-      const key = event.key.toLowerCase();
-      const editable = event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"]');
-      if (key === 's') { event.preventDefault(); if (!saving) saveGraph(); return; }
-      if (editable) return;
-      if (key === 'z') { event.preventDefault(); event.shiftKey ? history.redo() : history.undo(); }
-      if (key === 'y') { event.preventDefault(); history.redo(); }
-      if (key === 'd') { event.preventDefault(); duplicateSelected(); }
-    };
+    const handleKey = (event) => shortcutsRef.current?.(event);
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  });
+  }, []);
 
   async function autoLayout() {
     setLayoutBusy(true);

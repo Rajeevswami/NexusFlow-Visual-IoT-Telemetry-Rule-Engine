@@ -43,7 +43,7 @@ export function demoStatus() {
 
 export async function startDemo({ durationSeconds = 120 } = {}) {
   if (!env.demoEnabled) throw httpError(403, 'Demo mode is disabled. Set DEMO_ENABLED=true to enable it.');
-  if (current) return { ...demoStatus(), graph: (await Graph.findById(current.graphId).lean()) };
+  if (current) return { ...demoStatus(), graph: await Graph.findById(current.graphId).lean() };
   if (starting) return starting;
   starting = (async () => {
     if (!env.mockReceiverEnabled) throw httpError(409, 'Enable MOCK_RECEIVER_ENABLED=true for the local demo receiver.');
@@ -52,6 +52,7 @@ export async function startDemo({ durationSeconds = 120 } = {}) {
     catch (error) { throw httpError(409, `${error.message} For the local demo set ALLOW_PRIVATE_WEBHOOKS=true and DEMO_WEBHOOK_URL to the server's mock receiver.`); }
     const template = getTemplates()[0];
     const graph = await Graph.findOneAndUpdate({ templateKey: template.key }, { $set: template.graph }, { upsert: true, new: true, runValidators: true }).lean();
+    if (!graph) throw httpError(500, 'The demo template could not be prepared.');
     const graphId = String(graph._id);
     await activeGraphManager.activate(graphId);
     const now = Date.now();
@@ -68,6 +69,9 @@ export async function startDemo({ durationSeconds = 120 } = {}) {
 }
 
 export async function stopDemo() {
+  // A stop that arrives while the demo is still starting must not leave the interval
+  // running: wait for the start to settle, then stop whatever it produced.
+  if (starting) await starting.catch(() => {});
   if (!current) return { running: false };
   const state = current;
   current = null;

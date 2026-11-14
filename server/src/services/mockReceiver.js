@@ -10,4 +10,3 @@ export function receiveWebhook(body, headers = {}) {
   return { id: item.id, received: true };
 }
 export function listReceived(limit = 50) { return received.slice(0, Math.min(100, Math.max(1, limit))); }
-export function clearReceived() { received.length = 0; }

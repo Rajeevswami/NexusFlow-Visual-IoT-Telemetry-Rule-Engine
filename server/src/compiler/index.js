@@ -9,5 +9,5 @@ import './actions/index.js';
 import './sources/index.js';
 
 export { validateGraph } from './graphValidator.js';
-export { compileGraph, describeNodes, toEvent, GraphValidationError } from './streamCompiler.js';
+export { compileGraph, toEvent, GraphValidationError } from './streamCompiler.js';
 export { nodeRegistry, registerNode, getNode, hasNode, listNodes, nodeTypes, resolveConfig } from './nodeRegistry.js';

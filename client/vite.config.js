@@ -1,6 +1,10 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
+/**
+ * Vitest runs the frontend smoke tests (jsdom + React Testing Library).
+ * The plain-logic suites stay on Node's built-in runner, see the "test" script.
+ */
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_');
   const target = env.VITE_PROXY_TARGET || 'http://localhost:5000';
@@ -16,5 +20,26 @@ export default defineConfig(({ mode }) => {
       },
     },
     preview: { host: '0.0.0.0', allowedHosts: true },
+    build: {
+      rollupOptions: {
+        output: {
+          // Split the heavy, rarely-changing libraries so a code change only
+          // invalidates the small app chunk instead of a single ~1 MB bundle.
+          manualChunks: {
+            react: ['react', 'react-dom', 'react-router-dom'],
+            flow: ['@xyflow/react'],
+            charts: ['recharts'],
+          },
+        },
+      },
+    },
+    test: {
+      environment: 'jsdom',
+      include: ['test/**/*.test.{js,jsx}'],
+      exclude: ['test/**/*.node.test.js', 'node_modules/**'],
+      globals: true,
+      setupFiles: ['./test/setup.js'],
+      restoreMocks: true,
+    },
   };
 });

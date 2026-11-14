@@ -1,0 +1,4 @@
+# Netlify SPA routing: every path is served by index.html so React Router can handle
+# /dashboard and /alerts on a hard refresh. Static assets are excluded by the leading
+# slash pattern below (Netlify tries the file first, then this rule).
+/*  /index.html  200
