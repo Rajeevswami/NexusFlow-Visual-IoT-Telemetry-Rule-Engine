@@ -1,6 +1,14 @@
 # NexusFlow: Visual IoT Telemetry & Rule Engine
 
+Visual IoT telemetry rules, compiled and evaluated as live RxJS streams.
+
+[![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933)](https://nodejs.org/) [![React](https://img.shields.io/badge/React-19-61DAFB)](https://react.dev/) [![MongoDB](https://img.shields.io/badge/MongoDB-Time--Series-47A248)](https://www.mongodb.com/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 NexusFlow is a browser-based, no-code graph editor and live dashboard for IoT telemetry. Users compose sensor, transformation, condition and action nodes; a server-side RxJS compiler evaluates the resulting graph against incoming readings. Alerts can trigger audited webhook, SMS and email deliveries.
+
+> **Screenshot/GIF placeholder:** add authentic captures at `docs/screenshots/` (the expected filenames are listed in [the demo recording guide](docs/DEMO_VIDEO_SCRIPT.md)).
+
+**Features:** visual React Flow authoring; HTTP/WebSocket ingestion; MongoDB time-series history; RxJS rules; live dashboard and alerts; mock and optional outbound actions with delivery auditing.
 
 ```text
  HTTP / WS ingestion -> validation -> MongoDB time-series
@@ -177,6 +185,17 @@ The automatic binary download needs network access to MongoDB's download host.
 Set `INGEST_API_KEY` in the shell for the simulator and benchmark if enabled. For Docker,
 add `--url http://localhost:8080` to simulator/benchmark commands run from the host.
 Benchmark results depend on hardware and configuration; no throughput guarantee is implied.
+
+## Known Issues / verification limits
+
+- Mongo-backed integration tests were skipped in this environment because no disposable MongoDB URI was configured; run `TEST_MONGODB_URI=... npm test` (or `npm run test:db`) before submission.
+- Docker Compose and browser-driven save/reload/restart E2E were not executed here. `scripts/e2eCheck.js` checks API activation, anomaly ingestion, alert/delivery evidence and post-deactivation silence against a live server; it is not a browser test.
+- Fresh lockfile installs succeeded, but npm reported 2 moderate server advisories and 3 client advisories (1 moderate, 2 critical). Review `npm audit` before public deployment.
+- No real screenshot or benchmark values are claimed; capture these from a live run.
+
+**GitHub metadata suggestion:** description: “Visual IoT telemetry rule engine with React Flow, RxJS, MongoDB time-series and WebSockets.” Topics: `iot`, `rxjs`, `react-flow`, `mongodb-time-series`, `rule-engine`, `websocket`, `nodejs`, `react`. Pinned-repo tagline: “Turn live IoT telemetry into observable, visual rules.”
+
+**Commit messages:** use Conventional Commits, e.g. `fix(server): dispose subscriptions on graph deactivation` or `docs: record stabilization verification`.
 
 See [Architecture](docs/ARCHITECTURE.md), [Deployment](docs/DEPLOYMENT.md),
 [Final report](docs/FINAL_REPORT.md), [Audit report](docs/AUDIT_REPORT.md),
