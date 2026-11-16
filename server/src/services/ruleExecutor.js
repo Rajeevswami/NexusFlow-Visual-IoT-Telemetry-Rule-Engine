@@ -7,7 +7,7 @@ import { telemetryBus } from './telemetryBus.js';
  *
  * Subscribes to the telemetry bus once and routes every reading to the Source
  * Subject(s) of the graphs that care about it. Routing is O(1) for the common case:
- * an exact `deviceId:sensorType` Map lookup — never a loop over all active graphs.
+ * an exact encoded device/sensor tuple Map lookup — never a loop over all active graphs.
  * Graphs with wildcard sources (`*`) live in a tiny side list that is only scanned
  * when it is non-empty.
  *
@@ -17,11 +17,13 @@ import { telemetryBus } from './telemetryBus.js';
  */
 
 const WILDCARD = '*';
+// Tuple encoding prevents collisions when either identifier contains a colon.
+const sourceKey = (deviceId, sensorType) => JSON.stringify([deviceId, sensorType]);
 
 class RuleExecutor {
   /** @type {Map<string, Route>} graphId -> route (subject, subscription, sources) */
   #routes = new Map();
-  /** @type {Map<string, Set<Route>>} "deviceId:sensorType" -> routes with an exact source */
+  /** @type {Map<string, Set<Route>>} encoded device/sensor tuple -> routes with an exact source */
   #exact = new Map();
   /** @type {Map<Route, { deviceId: string, sensorType: string }[]>} wildcard sources, by route */
   #wildcards = new Map();
@@ -96,7 +98,7 @@ class RuleExecutor {
       if (deviceId === WILDCARD || sensorType === WILDCARD) {
         wildcards.push({ deviceId, sensorType });
       } else {
-        const key = `${deviceId}:${sensorType}`;
+        const key = sourceKey(deviceId, sensorType);
         let set = this.#exact.get(key);
         if (!set) { set = new Set(); this.#exact.set(key, set); }
         set.add(route);
@@ -123,7 +125,7 @@ class RuleExecutor {
     this.#wildcards.delete(route);
     for (const source of route.sources) {
       if (source.deviceId === WILDCARD || source.sensorType === WILDCARD) continue;
-      const key = `${source.deviceId}:${source.sensorType}`;
+      const key = sourceKey(source.deviceId, source.sensorType);
       const set = this.#exact.get(key);
       if (set) {
         set.delete(route);
@@ -147,7 +149,7 @@ class RuleExecutor {
     if (!deviceId || !sensorType) return 0;
 
     const matched = new Set();
-    const exact = this.#exact.get(`${deviceId}:${sensorType}`);
+    const exact = this.#exact.get(sourceKey(deviceId, sensorType));
     if (exact) for (const route of exact) matched.add(route);
     for (const [route, entries] of this.#wildcards) {
       for (const entry of entries) {

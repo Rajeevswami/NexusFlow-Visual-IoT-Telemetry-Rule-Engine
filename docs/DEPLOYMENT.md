@@ -18,7 +18,7 @@ Estimated time: 30–45 minutes.
 
 ## 0. Prerequisites
 
-- Node 20+ locally (`node -v`).
+- Node 22.22.2+ on the 22.x LTS line locally (`node -v`).
 - The repository cloned; `server/` and `client/` are the deploy roots.
 - A GitHub account (all three hosts deploy from a Git repository).
 
@@ -29,9 +29,10 @@ Estimated time: 30–45 minutes.
 1. Create a free **M0** cluster. Choose the region closest to your API host.
 2. **Database Access** → add a database user with a strong password (not your Atlas
    login).
-3. **Network Access** → add `0.0.0.0/0` (Render and Railway use dynamic IPs; the database
-   is still protected by the user password and the ingestion key). Tighten this later if
-   your host publishes static egress IPs.
+3. **Network Access** → allow only your API host’s egress IPs where possible.
+   `0.0.0.0/0` allows connections from anywhere and should only be a temporary,
+   consciously reviewed demo fallback. MongoDB credentials protect the database;
+   the ingestion API key does **not** protect direct database access.
 4. **Connect** → *Connect your application* → copy the SRV string. It looks like:
 
    ```text
@@ -88,7 +89,7 @@ than silently degrading.
 
 ### Environment variables
 
-`server/.env.production.example` is the annotated list. Minimum viable set:
+`server/.env.example` is the annotated list; override development defaults for production. Minimum viable set:
 
 | Variable | Value | Why |
 |---|---|---|
