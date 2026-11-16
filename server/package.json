@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
   },
   "scripts": {
-    "dev": "nodemon src/server.js",
+    "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "simulate": "node scripts/simulator.js",
     "engine-check": "node scripts/engineCheck.js",
@@ -41,7 +41,6 @@
   },
   "devDependencies": {
     "mongodb-memory-server": "^11.3.0",
-    "nodemon": "^3.1.11",
     "supertest": "^7.2.2",
     "vitest": "^5.1.0",
     "@vitest/coverage-v8": "^5.1.0"

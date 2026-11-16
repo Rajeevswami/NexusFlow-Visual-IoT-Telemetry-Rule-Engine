@@ -34,6 +34,19 @@ afterEach(() => {
 });
 
 describe('ruleExecutor', () => {
+  it('keeps colon-containing source tuples distinct, including after unregister', () => {
+    const a = fakeGraph('a', [{ deviceId: 'plant:turbine', sensorType: 'temperature' }]);
+    const b = fakeGraph('b', [{ deviceId: 'plant', sensorType: 'turbine:temperature' }]);
+    ruleExecutor.register(a);
+    ruleExecutor.register(b);
+    expect(ruleExecutor.route(reading('plant:turbine', 'temperature'))).toBe(1);
+    expect(a.received).toHaveLength(1);
+    expect(b.received).toHaveLength(0);
+    ruleExecutor.unregister('a');
+    expect(ruleExecutor.route(reading('plant', 'turbine:temperature'))).toBe(1);
+    expect(b.received).toHaveLength(1);
+  });
+
   it('routes a reading only to the graph whose source matches deviceId + sensorType', () => {
     const alpha = fakeGraph('graph-alpha', [{ deviceId: 'turbine-001', sensorType: 'temperature' }]);
     const beta = fakeGraph('graph-beta', [{ deviceId: 'turbine-002', sensorType: 'temperature' }]);

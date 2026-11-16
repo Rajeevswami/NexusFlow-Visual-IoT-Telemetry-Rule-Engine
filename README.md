@@ -2,7 +2,7 @@
 
 Visual IoT telemetry rules, compiled and evaluated as live RxJS streams.
 
-[![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933)](https://nodejs.org/) [![React](https://img.shields.io/badge/React-19-61DAFB)](https://react.dev/) [![MongoDB](https://img.shields.io/badge/MongoDB-Time--Series-47A248)](https://www.mongodb.com/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-22.22.2%2B-339933)](https://nodejs.org/) [![React](https://img.shields.io/badge/React-19-61DAFB)](https://react.dev/) [![MongoDB](https://img.shields.io/badge/MongoDB-Time--Series-47A248)](https://www.mongodb.com/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 NexusFlow is a browser-based, no-code graph editor and live dashboard for IoT telemetry. Users compose sensor, transformation, condition and action nodes; a server-side RxJS compiler evaluates the resulting graph against incoming readings. Alerts can trigger audited webhook, SMS and email deliveries.
 
@@ -34,7 +34,7 @@ NexusFlow is a browser-based, no-code graph editor and live dashboard for IoT te
 - Live chart and alert feed; activity-enabled animated edges and nodes, value badges, light/dark themes, Live Mode and split-view demo.
 - Templated webhooks with custom headers, mock SMS/email, optional Twilio/SMTP, cooldowns, bounded queue, per-graph limits, retry and delivery audit.
 - Private-network SSRF blocking by default, ingestion API key, request limits, security headers, structured logging and graceful shutdown.
-- Active graphs are re-hydrated from MongoDB on boot, so a restart never silently stops the rules.
+- Active graphs are re-hydrated from MongoDB on boot, with boot-time rehydration (see persistence limits below).
 
 ## Live demo
 
@@ -44,8 +44,8 @@ NexusFlow is a browser-based, no-code graph editor and live dashboard for IoT te
 | API health | <https://your-api.onrender.com/api/health> *(placeholder)* |
 | API base URL | `https://your-api.onrender.com/api` *(placeholder)* |
 
-The deployed instance runs the mock SMS/email providers and the in-memory mock receiver, so
-nothing leaves the machine. Free-tier hosts sleep when idle — see
+No deployed instance was verified here. Configure mock SMS/email and the local mock receiver
+for a credential-free demo; arbitrary webhook targets can still send data off-machine. Free-tier hosts sleep when idle — see
 [Waking the server](docs/DEPLOYMENT.md#7-waking-the-server-before-a-demo).
 
 ## Screenshots
@@ -55,13 +55,13 @@ nothing leaves the machine. Free-tier hosts sleep when idle — see
 
 | Editor | Dashboard |
 |---|---|
-| ![Graph editor with a sensor → moving average → threshold → SMS rule](docs/screenshots/editor.png) | ![Live dashboard with chart, stat cards and alert feed](docs/screenshots/dashboard.png) |
+| `docs/screenshots/editor.png` (capture pending) | `docs/screenshots/dashboard.png` (capture pending) |
 
 | Alerts & deliveries | Glowing wires during the demo |
 |---|---|
-| ![Alert list with masked delivery targets and retry buttons](docs/screenshots/alerts.png) | ![Canvas with animated edges while telemetry flows](docs/screenshots/canvas-glow.png) |
+| `docs/screenshots/alerts-delivery.png` (capture pending) | `docs/screenshots/canvas-glow.png` (capture pending) |
 
-**Stack:** Node 20+, Express, MongoDB 5.0+ (time-series), Mongoose, RxJS, WebSocket, React, Vite, React Flow, Recharts and Dagre.
+**Stack:** Node 22.22.2+ (22.x), Express, MongoDB 5.0+ (time-series), Mongoose, RxJS, WebSocket, React, Vite, React Flow, Recharts and Dagre.
 
 ## Quick start: Docker demo
 
@@ -78,10 +78,25 @@ The compose file explicitly enables private webhook destinations to let the serv
 
 ## Local development
 
-1. Install Node 20+ and start MongoDB 5.0+ on port 27017.
-2. `cd server && npm ci && cp .env.example .env` (Windows: copy the file). For the local mock webhook demo only, set `ALLOW_PRIVATE_WEBHOOKS=true` in `.env`. Leave it false otherwise.
-3. `npm run seed` (optional), then `npm run dev`.
-4. In another terminal, `cd client && npm ci && npm run dev`. Open http://localhost:5173.
+Prerequisites: Node **22.22.2+ on the 22.x LTS line** (verified with 22.22.3), npm,
+and MongoDB 7 running on port 27017. The declared engines also permit compatible
+24.x/26+ versions, which were not tested here. Node 20 is no longer supported by
+the installed test tools. From the repository root:
+
+```sh
+npm run install:all
+cp server/.env.example server/.env
+cp client/.env.example client/.env
+npm run dev
+# In a SECOND terminal at the repository root:
+npm run dev:client
+```
+
+Open http://localhost:5173. On Windows use `copy` instead of `cp`.
+For the local mock webhook demo only, edit `server/.env` to set
+`ALLOW_PRIVATE_WEBHOOKS=true`; keep `SMS_PROVIDER=mock`, `MOCK_RECEIVER_ENABLED=true`
+and `NODE_ACTIVITY_ENABLED=true`. Restart the API after changing its environment.
+Optional seeding: `npm run seed` from the repository root.
 
 The Vite proxy forwards `/api` and `/ws` to the backend. Set `VITE_PROXY_TARGET` in the client environment if the backend is elsewhere; browser requests remain same-origin. `VITE_API_BASE_URL` and `VITE_WS_URL` are optional overrides for separately hosted services. An ingestion key is required in production and must be sent as `x-api-key`; the editor's test-data button does not supply one, so use the simulator/API client when a key is enabled.
 
@@ -116,7 +131,7 @@ JSON unless noted. Errors have `{ "error": { "message", "code", "requestId", "de
 |---|---|
 | GET `/api/health` | Database and service health |
 | POST `/api/telemetry`, POST `/api/telemetry/batch` | Ingest one or an array of readings; optional `x-api-key` |
-| GET `/api/telemetry?deviceId=&sensorType=&from=&to=&limit=` | Historical readings |
+| GET `/api/telemetry?deviceId=&from=&to=&limit=` | Historical readings |
 | GET `/api/telemetry/stats?deviceId=&window=5m` | Aggregated statistics |
 | GET/POST `/api/graphs`; GET/PUT/DELETE `/api/graphs/:id` | Graph CRUD |
 | POST `/api/graphs/validate` | Validate raw graph |
@@ -131,7 +146,7 @@ JSON unless noted. Errors have `{ "error": { "message", "code", "requestId", "de
 | GET `/api/demo/status`; POST `/api/demo/start`, `/stop` | Start (`durationSeconds` 10–600, default 120) and stop the demo |
 | GET `/api/engine/status` | Engine and queue statistics |
 
-Example reading: `{"timestamp":"2026-01-01T00:00:00Z","metadata":{"deviceId":"turbine-001","sensorType":"temperature"},"value":90,"unit":"°C"}`.
+Example reading: `{"timestamp":"2026-01-01T00:00:00Z","metadata":{"deviceId":"turbine-001","sensorType":"temperature","location":"Site 1"},"value":90,"unit":"°C"}`.
 
 ## WebSocket protocol
 
@@ -186,12 +201,64 @@ Set `INGEST_API_KEY` in the shell for the simulator and benchmark if enabled. Fo
 add `--url http://localhost:8080` to simulator/benchmark commands run from the host.
 Benchmark results depend on hardware and configuration; no throughput guarantee is implied.
 
+## Day 6 verification and live E2E
+
+On 2026-11-16, Node 22.22.3/npm 10.9.8: installs, unit/HTTP tests without a DB,
+client build and both coverage commands passed. Server: 84 unit tests plus 15 HTTP
+tests passed, **5 Mongo-backed tests skipped**. Client: 1 logic + 4 smoke tests passed. Three checker contract tests also pass against
+a fake HTTP/WebSocket fixture; they do not verify the real application stack.
+Both dependency audits report zero advisories at this check (not a security guarantee).
+See [FIXES_LOG](docs/FIXES_LOG.md) for evidence, causes and outstanding gates.
+
+Against a **disposable local demo database**, with the server running and mock flags
+above enabled (the check creates telemetry/audit records and deletes its test graph):
+
+```sh
+node --env-file=server/.env scripts/e2eCheck.js
+# Docker: install server dependencies on the host first; the receiver URL is server-relative.
+E2E_URL=http://localhost:8080 node scripts/e2eCheck.js
+# Full DB suites, using a DIFFERENT disposable database:
+TEST_MONGODB_URI=mongodb://127.0.0.1:27017/nexusflow_test npm run test:db
+```
+
+The API check uses a unique device, MA(5), threshold >80, mock SMS and a webhook
+receiver. It checks settings/edge round-trip, activation, normal readings then spikes,
+both successful delivery channels, receiver evidence, WebSocket events and a two-second
+no-alert observation after deactivation. `E2E_URL` is the host-accessible API origin;
+`DEMO_WEBHOOK_URL` must be reachable **from the server**, not just your browser.
+Only run against mock providers: the script cannot override a running server's provider.
+It does not prove visual animation, a browser reload, or process-restart persistence.
+
+Manual release gates:
+1. Build/save the exact graph in the editor, reload, Load, and inspect all five node settings and four edges.
+2. Activate, enable Live Mode, run `npm --prefix server run simulate -- --devices 1 --interval 500 --spikes 1`.
+   Show canvas, Dashboard and Alerts with successful deliveries; inspect browser/server consoles.
+3. Deactivate while ingestion continues; distinguish already-queued deliveries from new alerts. Stop simulator.
+4. Activate again, wait until the stored graph's `isActive` is true, restart the **API process**
+   (`docker compose restart server` for Docker), check `/api/graphs/active`, then ingest again.
+   Finally deactivate and restart once more to verify it stays inactive.
+5. Inspect `db.getCollectionInfos({name: "telemetry"})` in mongosh: timeField `timestamp`,
+   metaField `metadata`, granularity `seconds`; inspect a reading's BSON Date and `device_timestamp` index.
+
 ## Known Issues / verification limits
 
-- Mongo-backed integration tests were skipped in this environment because no disposable MongoDB URI was configured; run `TEST_MONGODB_URI=... npm test` (or `npm run test:db`) before submission.
-- Docker Compose and browser-driven save/reload/restart E2E were not executed here. `scripts/e2eCheck.js` checks API activation, anomaly ingestion, alert/delivery evidence and post-deactivation silence against a live server; it is not a browser test.
-- Fresh lockfile installs succeeded, but npm reported 2 moderate server advisories and 3 client advisories (1 moderate, 2 critical). Review `npm audit` before public deployment.
-- No real screenshot or benchmark values are claimed; capture these from a live run.
+- **NO-GO for complete Day 6 sign-off:** MongoDB, Docker and mongosh are unavailable in this workspace.
+  API startup failed with `ECONNREFUSED`; `npm run test:db` failed downloading MongoDB
+  (`fastdl.mongodb.org` is blocked). No collection-creation or real restart result is claimed.
+- `scripts/e2eCheck.js` currently exits FAIL here because no live API exists. Its successful
+  path must still be run against MongoDB. Docker Compose configuration was reviewed, not built/run.
+- Client dev server returned HTTP 200, but `/api/health` through its proxy returned 500
+  because the backend was down. Browser rendering, glow, chart updates, reconnect behavior,
+  console cleanliness and deployed HTTPS/WSS/CORS remain manual verification gates.
+- Active flags are currently best-effort asynchronous writes. A failed write or rapid
+  recompile/deactivate/restart may leave persisted intent inconsistent with runtime state.
+  Do not claim crash-safe activation or guaranteed rehydration.
+- A transform error is isolated from siblings but ends that branch until reactivation;
+  action errors are caught per event. Deactivation does not cancel deliveries already queued.
+- No authentication/tenant isolation; local demo permits private webhooks. Do not expose
+  this demo configuration publicly or use real credentials. No full-history secret audit:
+  this checkout is shallow. No tracked real `.env` file or obvious secret was found locally.
+- Screenshots, benchmarks and storage measurements are pending; no invented captures or values.
 
 **GitHub metadata suggestion:** description: “Visual IoT telemetry rule engine with React Flow, RxJS, MongoDB time-series and WebSockets.” Topics: `iot`, `rxjs`, `react-flow`, `mongodb-time-series`, `rule-engine`, `websocket`, `nodejs`, `react`. Pinned-repo tagline: “Turn live IoT telemetry into observable, visual rules.”
 
@@ -214,7 +281,6 @@ NexusFlow-Visual-IoT-Telemetry-Rule-Engine/
 │   ├── vercel.json               # SPA rewrites + asset caching for Vercel
 │   ├── public/_redirects         # SPA fallback for Netlify
 │   ├── .env.example              # dev: VITE_API_BASE_URL / VITE_PROXY_TARGET
-│   ├── .env.production.example   # prod: VITE_API_URL / VITE_WS_URL
 │   └── src/
 │       ├── pages/                # EditorPage, DashboardPage, AlertsPage
 │       ├── components/
@@ -225,11 +291,10 @@ NexusFlow-Visual-IoT-Telemetry-Rule-Engine/
 │       ├── hooks/                # useTelemetrySeries, useGraphHistory
 │       ├── services/             # api, graphSerializer, autoLayout, activityStore
 │       ├── ws/                   # WebSocketProvider, useChannel
-│       └── test/                 # logic suite + Vitest/RTL canvas smoke tests
+│   └── test/                     # logic suite + Vitest/RTL canvas smoke tests
 ├── server/                       # Express + Mongoose + RxJS API
 │   ├── Procfile                  # Railway / Heroku start command
 │   ├── .env.example              # development configuration
-│   ├── .env.production.example   # production configuration (annotated)
 │   ├── samples/                  # turbine-graph.json
 │   ├── scripts/                  # seed/bootstrap, simulator, benchmark, storageReport,
 │   │                             # ruleLatency, engineCheck, testWithMongo
@@ -253,3 +318,17 @@ NexusFlow-Visual-IoT-Telemetry-Rule-Engine/
     ├── DEPLOYMENT.md  FINAL_REPORT.md  VIVA_QA.md
     └── PRESENTATION_OUTLINE.md  DEMO_CHECKLIST.md
 ```
+
+## Submission gate
+
+- [x] Dependency installation, non-DB tests, client build and coverage commands pass.
+- [x] Environment examples, MIT license, fixes log, demo script and portfolio text exist.
+- [x] Dependency audit is clean at the recorded check.
+- [ ] Fresh Mongo-backed start, time-series creation and all DB tests pass without skips.
+- [ ] Live `scripts/e2eCheck.js` passes every step.
+- [ ] Docker stack build/start and browser save/reload/live flow are verified.
+- [ ] Actual API restart restores active graphs; inactive graphs stay inactive.
+- [ ] Capture genuine screenshots/results and review full Git history for secrets.
+
+**Decision: NO-GO for full submission sign-off until unchecked gates are evidenced.**
+See [demo recording guide](docs/DEMO_VIDEO_SCRIPT.md) and [portfolio text](docs/PORTFOLIO_TEXT.md).
